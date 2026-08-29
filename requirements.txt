@@ -1,0 +1,17 @@
+google-genai
+feedparser
+requests
+beautifulsoup4
+googlenewsdecoder
+sift-stack-py
+beautifulsoup4
+feedparser
+google-genai
+requests
+beautifulsoup4
+feedparser
+google-genai
+googlenewsdecoder
+requests
+tweepy
+tweepy
