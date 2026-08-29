@@ -4,7 +4,7 @@ Set the following environment variables before running:
     GEMINI_API_KEY
 
 Optional:
-    GEMINI_MODEL (defaults to gemini-2.5-flash)
+    GEMINI_MODEL (defaults to gemini-3.6-flash)
     NEWS_FEED_URL (defaults to the Google News top stories RSS feed)
 """
 
@@ -35,7 +35,7 @@ def create_gemini_client() -> genai.Client:
 
 def generate_text(client: genai.Client, prompt: str) -> str:
     """Generate text with Gemini."""
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     response = client.models.generate_content(model=model_name, contents=prompt)
     return response.text
 
