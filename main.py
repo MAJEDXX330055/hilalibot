@@ -1,46 +1,71 @@
-"""Fetch news, generate a tweet with Gemini, and log it continuously without duplicates.
+"""Fetch Hilal news, generate a post with Gemini, and send it directly to Telegram.
 
-Set the following environment variables before running:
+Set the following environment variables in Render:
     GEMINI_API_KEY
+    TELEGRAM_BOT_TOKEN
+    TELEGRAM_CHAT_ID
 
 Optional:
     GEMINI_MODEL (defaults to gemini-3.6-flash)
-    NEWS_FEED_URL (defaults to the Google News top stories RSS feed)
+    NEWS_FEED_URL (defaults to Google News Hilal search RSS)
 """
 
 import os
 import time
 import threading
+import requests
 from flask import Flask
 import feedparser
 from google import genai
 
-# إنشاء خادم ويب خفيف لإرضاء منصة Render Web Service
+# سيرفر خفيف لإبقاء الخدمة Live على Render
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is running live!"
+    return "Hilal Telegram Bot is running live!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
+# رابط RSS مخصص لأخبار نادي الهلال السعودي
 DEFAULT_NEWS_FEED_URL = (
-    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
+    "https://news.google.com/rss/search?q=%D9%86%D8%A7%D8%AF%D9%8A+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar"
 )
 
-# ذاكرة لتخزين الأخبار السابقة لمنع التكرار
 seen_articles = set()
 
 
-def publish_tweet(tweet: str):
-    """Bypass posting to X temporarily to prevent API credit errors."""
-    print("\n----------------------------------------")
-    print("[Twitter Disabled] Generated Tweet:")
-    print(tweet)
-    print("----------------------------------------\n")
-    return True
+def send_telegram_message(text: str) -> bool:
+    """Send generated news post to Telegram channel or chat."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+
+    if not bot_token or not chat_id:
+        print("[Warning] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing in environment variables.")
+        print(f"[Log Output]:\n{text}")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown"
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        res_data = response.json()
+        if res_data.get("ok"):
+            print("تم إرسال الخبر إلى تلجرام بنجاح!")
+            return True
+        else:
+            print(f"فشل إرسال التلجرام: {res_data.get('description')}")
+            return False
+    except Exception as e:
+        print(f"خطأ أثناء الإرسال لتلجرام: {e}")
+        return False
 
 
 def create_gemini_client() -> genai.Client:
@@ -62,9 +87,7 @@ def read_rss_feed(feed_url: str, limit: int = 5) -> list[dict[str, str]]:
     """Read a feed and return a small, normalized list of entries."""
     parsed_feed = feedparser.parse(feed_url)
     if not parsed_feed.entries:
-        error = getattr(parsed_feed, "bozo_exception", None)
-        detail = f": {error}" if error else ""
-        raise RuntimeError(f"No news entries were found in the RSS feed{detail}")
+        return []
 
     return [
         {
@@ -76,48 +99,30 @@ def read_rss_feed(feed_url: str, limit: int = 5) -> list[dict[str, str]]:
     ]
 
 
-def build_tweet_prompt(news_items: list[dict[str, str]]) -> str:
-    """Build a grounded prompt from the latest news entries."""
+def build_news_prompt(news_items: list[dict[str, str]]) -> str:
+    """Build a prompt for generating Telegram news posts."""
     formatted_items = "\n\n".join(
-        f"Headline: {item['title']}\nSummary: {item['summary']}\nSource: {item['link']}"
+        f"العنوان: {item['title']}\nالتفاصيل: {item['summary']}"
         for item in news_items
     )
-    return f"""Write one factual tweet about the most significant story below.
+    return f"""صغ منشوراً إخبارياً مشوقاً وقصيراً عن نادي الهلال بناءً على التفاصيل التالية:
 
-Rules:
-- Return only the tweet text, with no quotation marks, labels, or markdown.
-- Keep it under 260 characters so it can be posted safely to X.
-- Summarize only information present in the supplied headlines or summaries.
-- Do not invent details, statistics, opinions, or quotes.
-- Use a clear, neutral news tone.
+الشروط:
+- الصياغة باللغة العربية بأسلوب إخباري مميز ورياضي.
+- استخدام إيموجيات مناسبة وهاشتاجات مثل #الهلال.
+- لا تضف أي مقدمات أو شرح، اكتب نص المنشور فقط.
 
-Latest news:
+الأخبار:
 {formatted_items}
 """
 
 
-def clean_tweet(tweet: str) -> str:
-    """Normalize Gemini output and ensure it fits within X's character limit."""
-    cleaned = tweet.strip().replace("\n", " ")
-    if cleaned.startswith("```") and cleaned.endswith("```"):
-        cleaned = cleaned[3:-3].strip()
-    if cleaned.lower().startswith("tweet:"):
-        cleaned = cleaned[6:].strip()
-    cleaned = cleaned.strip("\"'").strip()
-
-    if not cleaned:
-        raise RuntimeError("Gemini returned an empty tweet")
-    if len(cleaned) > 280:
-        cleaned = f"{cleaned[:277].rstrip()}..."
-    return cleaned
-
-
 def bot_loop() -> None:
-    """Fetch news continuously and generate tweets without duplicates."""
+    """Fetch Hilal news continuously and send to Telegram without duplicates."""
     gemini_client = create_gemini_client()
     feed_url = os.getenv("NEWS_FEED_URL", DEFAULT_NEWS_FEED_URL)
 
-    print("البوت يعمل الآن ويراقب الأخبار جديدة...")
+    print("البوت يعمل الآن ويراقب أخبار الهلال...")
 
     while True:
         try:
@@ -126,26 +131,25 @@ def bot_loop() -> None:
 
             if new_stories:
                 print(f"تم العثور على {len(new_stories)} خبر جديد. جاري المعالجة...")
-                tweet = clean_tweet(generate_text(gemini_client, build_tweet_prompt(new_stories)))
-                publish_tweet(tweet)
-
-                for item in new_stories:
-                    seen_articles.add(item["link"])
+                post_text = generate_text(gemini_client, build_news_prompt(new_stories))
+                
+                # إرسال الخبر إلى تلجرام
+                if send_telegram_message(post_text):
+                    for item in new_stories:
+                        seen_articles.add(item["link"])
             else:
-                print("لا يوجد أخبار جديدة في هذه الدورة. تم تجاوز النشر لمنع التكرار.")
+                print("لا توجد أخبار جديدة لنادي الهلال حالياً.")
 
         except Exception as e:
             print(f"حدث خطأ أثناء التشغيل: {e}")
 
-        print("في انتظار الدورة القادمة بعد 15 دقيقة (900 ثانية)...")
-        time.sleep(900)
+        # التحقق كل 10 دقائق
+        time.sleep(600)
 
 
 if __name__ == "__main__":
-    # تشغيل سيرفر الويب في مسار مستقل (Thread)
     server_thread = threading.Thread(target=run_web_server)
     server_thread.daemon = True
     server_thread.start()
 
-    # تشغيل حلقة البوت الرئيسية
     bot_loop()
