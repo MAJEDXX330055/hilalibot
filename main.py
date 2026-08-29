@@ -1,4 +1,4 @@
-"""Fetch Hilal news, generate a post with Gemini, and send it directly to Telegram.
+"""Fetch Hilal news, generate a post with Gemini, and send it directly to Telegram every 3 minutes.
 
 Set the following environment variables in Render:
     GEMINI_API_KEY
@@ -122,7 +122,7 @@ def bot_loop() -> None:
     gemini_client = create_gemini_client()
     feed_url = os.getenv("NEWS_FEED_URL", DEFAULT_NEWS_FEED_URL)
 
-    print("البوت يعمل الآن ويراقب أخبار الهلال...")
+    print("البوت يعمل الآن ويراقب أخبار الهلال كل 3 دقائق...")
 
     while True:
         try:
@@ -143,8 +143,9 @@ def bot_loop() -> None:
         except Exception as e:
             print(f"حدث خطأ أثناء التشغيل: {e}")
 
-        # التحقق كل 10 دقائق
-        time.sleep(600)
+        # التحقق كل 3 دقائق (180 ثانية)
+        print("في انتظار الدورة القادمة بعد 3 دقائق (180 ثانية)...")
+        time.sleep(180)
 
 
 if __name__ == "__main__":
