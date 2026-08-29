@@ -10,14 +10,27 @@ Optional:
 
 import os
 import time
+import threading
+from flask import Flask
 import feedparser
 from google import genai
+
+# إنشاء خادم ويب خفيف لإرضاء منصة Render Web Service
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running live!"
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 DEFAULT_NEWS_FEED_URL = (
     "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
 )
 
-# قائمة لتخزين روابط الأخبار المنشورة سابقة لمنع التكرار
+# ذاكرة لتخزين الأخبار السابقة لمنع التكرار
 seen_articles = set()
 
 
@@ -99,28 +112,23 @@ def clean_tweet(tweet: str) -> str:
     return cleaned
 
 
-def main() -> None:
+def bot_loop() -> None:
     """Fetch news continuously and generate tweets without duplicates."""
     gemini_client = create_gemini_client()
     feed_url = os.getenv("NEWS_FEED_URL", DEFAULT_NEWS_FEED_URL)
 
-    print("البوت يعمل الآن ويراقب الأخبار الجديدة...")
+    print("البوت يعمل الآن ويراقب الأخبار جديدة...")
 
     while True:
         try:
             news_items = read_rss_feed(feed_url)
-            
-            # تصفية الأخبار الجديدة فقط التي لم يتم نشرها سابقاً
             new_stories = [item for item in news_items if item["link"] not in seen_articles]
 
             if new_stories:
                 print(f"تم العثور على {len(new_stories)} خبر جديد. جاري المعالجة...")
-                
-                # إنشاء وتجهيز الخبر
                 tweet = clean_tweet(generate_text(gemini_client, build_tweet_prompt(new_stories)))
                 publish_tweet(tweet)
 
-                # إضافة روابط الأخبار المعالجة إلى القائمة لمنع تكرارها
                 for item in new_stories:
                     seen_articles.add(item["link"])
             else:
@@ -129,10 +137,15 @@ def main() -> None:
         except Exception as e:
             print(f"حدث خطأ أثناء التشغيل: {e}")
 
-        # الانتظار لمدة 15 دقيقة (900 ثانية) للتحقق من الأخبار الجديدة
         print("في انتظار الدورة القادمة بعد 15 دقيقة (900 ثانية)...")
         time.sleep(900)
 
 
 if __name__ == "__main__":
-    main()
+    # تشغيل سيرفر الويب في مسار مستقل (Thread)
+    server_thread = threading.Thread(target=run_web_server)
+    server_thread.daemon = True
+    server_thread.start()
+
+    # تشغيل حلقة البوت الرئيسية
+    bot_loop()
