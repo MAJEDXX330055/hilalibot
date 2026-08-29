@@ -1,14 +1,14 @@
-"""Multi-source Al-Hilal Telegram Bot with Real Football Banter & Instant News.
+"""Multi-source Al-Hilal Telegram Bot - Pure Instant News Fetcher.
 
 Monitored Accounts:
-- @Alhilal_FC (Official match events, goals, substitutions)
-- @hilalstuff (Al-Hilal News & Medical Updates)
-- @RotanaSport (Media statements & shows)
-- @thmanyahsports (Media statements)
-- @MnbrAlhilal (Fan news & updates)
-- @baytAlhilal (Fan news & updates)
-- @Radar_alhilal1 (News & media clips)
-- @FabrizioRomano (Transfers news)
+- @Alhilal_FC
+- @hilalstuff
+- @RotanaSport
+- @thmanyahsports
+- @MnbrAlhilal
+- @baytAlhilal
+- @Radar_alhilal1
+- @FabrizioRomano
 
 Set environment variables in Render:
     GEMINI_API_KEY
@@ -28,13 +28,13 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Hilal Multi-Source Bot is running live 24/7!"
+    return "Hilal Pure News Bot is running live 24/7!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# قائمة الحسابات الثمانية للمراقبة المباشرة
+# استخدام خوادم متوزعة ومستقرة لضمان التقاط الأخبار فور نزولها
 ACCOUNTS = {
     "official": "https://nitter.poast.org/Alhilal_FC/rss",
     "hilalstuff": "https://nitter.poast.org/hilalstuff/rss",
@@ -47,7 +47,6 @@ ACCOUNTS = {
 }
 
 seen_posts = set()
-no_news_counter = 0
 
 
 def send_telegram_post(text: str, image_url: str = None) -> bool:
@@ -102,52 +101,16 @@ def generate_text(client: genai.Client, prompt: str) -> str:
     return response.text
 
 
-def format_statement_prompt(source_name: str, tweet_text: str) -> str:
+def format_news_prompt(source_name: str, tweet_text: str) -> str:
     return f"""المصدر: {source_name}
 التغريدة الأصلية:
 {tweet_text}
 
 المطلوب:
-1. صغ المنشور كـ "تصريح إعلامي" أو خبر عاجل.
-2. ابدأ المنشور بـ 🚨🚨🚨 | **عاجل:** أو **تصريح:** حسب محتوى التغريدة.
-3. اذكر التفاصيل المباشرة بوضوح ودقة بدون مقدمات أو شرح.
-"""
-
-
-def format_official_prompt(tweet_text: str) -> str:
-    return f"""التغريدة من حساب نادي الهلال الرسمي:
-{tweet_text}
-
-المطلوب:
-1. صغ المنشور كـ تغطية مباشرة لمباراة أو خبر رسمي.
-2. استخدم الإيموجيات المناسبة للحدث (⚽️، ⏱️، 🔄، 🏥).
-3. اكتب النص بشكل واضح ومباشر بدون مقدمات.
-"""
-
-
-def format_fabrizio_prompt(tweet_text: str) -> str:
-    return f"""التغريدة من فابريزيو رومانو:
-{tweet_text}
-
-المطلوب:
-1. ابدأ المنشور بـ: 🚨⚡️ **فابريزيو رومانو:**
-2. ترجم الخبر إلى العربية بدقة.
-3. بدون أي مقدمات إضافية.
-"""
-
-
-def format_spicy_banter_prompt() -> str:
-    return """أنت مغرد هلالي متعصب وشديد الطقطقة في تويتر. اكتب تغريدة واحدة قصيرة وقوية جداً (Spicy Banter) للجمهور الهلالي تعتمد على ذكريات ومواقف قاسية ومضحكة للمنافسين.
-
-اختر موضوعاً واحداً من هذه المواضيع:
-1. هبوط النادي الأهلي لدوري يلو والمعاناة هناك.
-2. عقدة النصر مع آسيا والدوري وسنوات الحرمان وقصة "الترشيح".
-3. نتائج الخمسات والنتائج الثقيلة التاريخية التي أكلها المنافسون من الهلال.
-4. هدف جحفلي الشهير في الدقيقة 119 والريمونتادات القاتلة.
-
-الشروط:
-- أسلوب ساخر، قوي، ويجبر جمهور الأندية الأخرى على الرد والتفاعل.
-- لا تكتب مقدمات، اعطني نص التغريدة فوراً.
+1. صغ المنشور كـ خبر كروي عاجل أو تغطية شمولية.
+2. ابدأ المنشور بـ 🚨🚨🚨 | **خبر:** أو **عاجل:** حسب السياق.
+3. اختصر النص مع الحفاظ على كل أسماء اللاعبين وتفاصيل الصفقات أو القائمة المذكورة بالكامل.
+4. اترك الصياغة مباشرة وجذابة للنشر بدون مقدمات إضافية.
 """
 
 
@@ -165,7 +128,7 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
         return 0
 
     sent_count = 0
-    for entry in parsed_feed.entries[:5]:
+    for entry in parsed_feed.entries[:10]:
         link = entry.get("link", "")
         if link in seen_posts:
             continue
@@ -175,13 +138,7 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
         full_text = f"{title}\n{summary}"
         image_url = extract_media_url(entry)
 
-        if source_key in ["official", "hilalstuff"]:
-            prompt = format_official_prompt(full_text)
-        elif source_key == "fabrizio":
-            prompt = format_fabrizio_prompt(full_text)
-        else:
-            prompt = format_statement_prompt(source_key, full_text)
-
+        prompt = format_news_prompt(source_key, full_text)
         post_text = generate_text(gemini_client, prompt)
 
         if send_telegram_post(post_text, image_url):
@@ -192,37 +149,18 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
 
 
 def bot_loop() -> None:
-    global no_news_counter
     gemini_client = create_gemini_client()
-    print("البوت يعمل بنظام التحديث السريع واللحظي...")
+    print("البوت يعمل الآن مخصصاً للأخبار الحقيقية فقط بدون إرسال أي طقطقة عشوائية...")
 
     while True:
-        total_new_posts = 0
         try:
             for source_key, url in ACCOUNTS.items():
-                total_new_posts += process_feed(source_key, url, gemini_client)
-
-            if total_new_posts == 0:
-                no_news_counter += 1
-
-                # توليد طقطقة إذا لم تظهر أخبار بعد 30 فحصاً متتالياً
-                if no_news_counter >= 30:
-                    print("توليد تغريدة طقطقة تاريخية...")
-                    banter_prompt = format_spicy_banter_prompt()
-                    banter_text = generate_text(gemini_client, banter_prompt)
-                    
-                    formatted_banter = f"🔥 **طقطقة / ذكريات:**\n\n{banter_text}"
-                    send_telegram_post(formatted_banter)
-                    
-                    no_news_counter = 0
-            else:
-                no_news_counter = 0
-
+                process_feed(source_key, url, gemini_client)
         except Exception as e:
             print(f"حدث خطأ في الدورة: {e}")
 
-        # فحص كافي وسريع جداً كل 10 ثوانٍ لمنع الحظر وضمان السرعة
-        time.sleep(10)
+        # فحص كافي ومتوازن كل 20 ثانية
+        time.sleep(20)
 
 
 if __name__ == "__main__":
