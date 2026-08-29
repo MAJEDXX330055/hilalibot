@@ -1,21 +1,14 @@
-"""Fetch news, generate a tweet with Gemini, and publish it to X.
+"""Fetch news, generate a tweet with Gemini, and log it (X posting bypassed).
 
 Set the following environment variables before running:
-
-    X_CONSUMER_KEY
-    X_CONSUMER_SECRET
-    X_ACCESS_TOKEN
-    X_ACCESS_TOKEN_SECRET
     GEMINI_API_KEY
 
 Optional:
-
-    GEMINI_MODEL (defaults to gemini-3.6-flash)
+    GEMINI_MODEL (defaults to gemini-2.5-flash)
     NEWS_FEED_URL (defaults to the Google News top stories RSS feed)
 """
 
 import os
-
 import feedparser
 from google import genai
 import tweepy
@@ -25,19 +18,11 @@ DEFAULT_NEWS_FEED_URL = (
 )
 
 
-def create_x_client() -> tweepy.Client:
-    """Create an X API v2 client using OAuth 1.0a User Context."""
-    return tweepy.Client(
-        consumer_key=os.environ["X_CONSUMER_KEY"],
-        consumer_secret=os.environ["X_CONSUMER_SECRET"],
-        access_token=os.environ["X_ACCESS_TOKEN"],
-        access_token_secret=os.environ["X_ACCESS_TOKEN_SECRET"],
-    )
-
-
-def publish_tweet(tweet: str) -> tweepy.Response:
-    """Publish a tweet using OAuth 1.0a User Context."""
-    return create_x_client().create_tweet(text=tweet, user_auth=True)
+def publish_tweet(tweet: str):
+    """Bypass posting to X temporarily to prevent API credit errors."""
+    print("[Twitter Disabled] Generated Tweet:")
+    print(tweet)
+    return True
 
 
 def create_gemini_client() -> genai.Client:
@@ -50,7 +35,7 @@ def create_gemini_client() -> genai.Client:
 
 def generate_text(client: genai.Client, prompt: str) -> str:
     """Generate text with Gemini."""
-    model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     response = client.models.generate_content(model=model_name, contents=prompt)
     return response.text
 
@@ -110,19 +95,13 @@ def clean_tweet(tweet: str) -> str:
 
 
 def main() -> None:
-    """Fetch news, generate a tweet, and publish it to X."""
+    """Fetch news, generate a tweet, and output it."""
     gemini_client = create_gemini_client()
     feed_url = os.getenv("NEWS_FEED_URL", DEFAULT_NEWS_FEED_URL)
     news_items = read_rss_feed(feed_url)
     tweet = clean_tweet(generate_text(gemini_client, build_tweet_prompt(news_items)))
 
-    response = publish_tweet(tweet)
-    tweet_id = response.data.get("id") if response.data else None
-    if not tweet_id:
-        raise RuntimeError("X did not return a tweet ID after publishing")
-
-    print(f"Published tweet {tweet_id}:")
-    print(tweet)
+    publish_tweet(tweet)
 
 
 if __name__ == "__main__":
