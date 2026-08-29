@@ -2,6 +2,7 @@
 
 Monitored Accounts:
 - @Alhilal_FC (Official match events, goals, substitutions)
+- @hilalstuff (Al-Hilal News & Medical Updates)
 - @RotanaSport (Media statements & shows)
 - @thmanyahsports (Media statements)
 - @MnbrAlhilal (Fan news & updates)
@@ -33,9 +34,10 @@ def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# روابط المراقبة
+# قائمة الحسابات الثمانية للمراقبة المباشرة
 ACCOUNTS = {
     "official": "https://nitter.poast.org/Alhilal_FC/rss",
+    "hilalstuff": "https://nitter.poast.org/hilalstuff/rss",
     "rotana": "https://nitter.poast.org/RotanaSport/rss",
     "thmanyah": "https://nitter.poast.org/thmanyahsports/rss",
     "mnbr": "https://nitter.poast.org/MnbrAlhilal/rss",
@@ -106,11 +108,9 @@ def format_statement_prompt(source_name: str, tweet_text: str) -> str:
 {tweet_text}
 
 المطلوب:
-1. صغ المنشور كـ "تصريح إعلامي".
-2. ابدأ المنشور بالسطر التالي تماماً وبشكل بارز:
-🚨🚨🚨 | **تصريح:**
-3. اذكر اسم الإعلامي أو الضيف المذكور متبوعاً بنص التصريح بوضوح ودقة.
-4. لا تضف أي مقدمات أو شرح إضافي.
+1. صغ المنشور كـ "تصريح إعلامي" أو خبر عاجل.
+2. ابدأ المنشور بـ 🚨🚨🚨 | **عاجل:** أو **تصريح:** حسب محتوى التغريدة.
+3. اذكر التفاصيل المباشرة بوضوح ودقة بدون مقدمات أو شرح.
 """
 
 
@@ -120,9 +120,8 @@ def format_official_prompt(tweet_text: str) -> str:
 
 المطلوب:
 1. صغ المنشور كـ تغطية مباشرة لمباراة أو خبر رسمي.
-2. استخدم الإيموجيات المناسبة للحدث (⚽️ للأهداف، ⏱️ للتوقيت والدقيقة، 🔄 للتبديلات).
-3. اكتب التوقيت أو الدقيقة في بداية النص بشكل واضح.
-4. اقتصر فقط على نص التغطية بدون مقدمات.
+2. استخدم الإيموجيات المناسبة للحدث (⚽️، ⏱️، 🔄، 🏥).
+3. اكتب النص بشكل واضح ومباشر بدون مقدمات.
 """
 
 
@@ -132,24 +131,21 @@ def format_fabrizio_prompt(tweet_text: str) -> str:
 
 المطلوب:
 1. ابدأ المنشور بـ: 🚨⚡️ **فابريزيو رومانو:**
-2. ترجم الخبر إلى العربية بدقة مع تفصيل النقاط المهمة.
+2. ترجم الخبر إلى العربية بدقة.
 3. بدون أي مقدمات إضافية.
 """
 
 
 def format_spicy_banter_prompt() -> str:
-    """Prompt for real, sharp, historical football banter."""
     return """أنت مغرد هلالي متعصب وشديد الطقطقة في تويتر. اكتب تغريدة واحدة قصيرة وقوية جداً (Spicy Banter) للجمهور الهلالي تعتمد على ذكريات ومواقف قاسية ومضحكة للمنافسين.
 
-اختر موضوعاً واحداً من هذه المواضيع وسير النمط عليه:
-1. هبوط النادي الأهلي لدوري يلو والمعاناة هناك مقارنة بقمة الهلال.
-2. عقدة النصر مع آسيا والدوري وسنوات الحرمان السابقة وقصة "الترشيح".
+اختر موضوعاً واحداً من هذه المواضيع:
+1. هبوط النادي الأهلي لدوري يلو والمعاناة هناك.
+2. عقدة النصر مع آسيا والدوري وسنوات الحرمان وقصة "الترشيح".
 3. نتائج الخمسات والنتائج الثقيلة التاريخية التي أكلها المنافسون من الهلال.
 4. هدف جحفلي الشهير في الدقيقة 119 والريمونتادات القاتلة.
-5. الفارق الشاسع في عدد البطولات الرسمية والفرق بين العالمي الحقيقي والمحلي.
 
 الشروط:
-- اكتب بأسلوب التغريدات الجماهيرية الساخرة والمستفزة جداً للمنافسين (بدون سب أو شتم أخلاقي).
 - أسلوب ساخر، قوي، ويجبر جمهور الأندية الأخرى على الرد والتفاعل.
 - لا تكتب مقدمات، اعطني نص التغريدة فوراً.
 """
@@ -169,7 +165,6 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
         return 0
 
     sent_count = 0
-    # قراءة أحدث 5 تغريدات من كل حساب لضمان عدم تفويت أي خبر
     for entry in parsed_feed.entries[:5]:
         link = entry.get("link", "")
         if link in seen_posts:
@@ -180,7 +175,7 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
         full_text = f"{title}\n{summary}"
         image_url = extract_media_url(entry)
 
-        if source_key == "official":
+        if source_key in ["official", "hilalstuff"]:
             prompt = format_official_prompt(full_text)
         elif source_key == "fabrizio":
             prompt = format_fabrizio_prompt(full_text)
@@ -199,7 +194,7 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
 def bot_loop() -> None:
     global no_news_counter
     gemini_client = create_gemini_client()
-    print("البوت يعمل بوضع الجلب السريع والطقطقة القوية...")
+    print("البوت يعمل بنظام التحديث السريع واللحظي...")
 
     while True:
         total_new_posts = 0
@@ -209,11 +204,10 @@ def bot_loop() -> None:
 
             if total_new_posts == 0:
                 no_news_counter += 1
-                print(f"لا توجد أخبار جديدة (العداد: {no_news_counter})")
 
-                # عند وصول العداد إلى 4 دورات بدون أخبار جديدة (كل 8 دقائق)
-                if no_news_counter >= 4:
-                    print("توليد تغريدة طقطقة تاريخية قوية...")
+                # توليد طقطقة إذا لم تظهر أخبار بعد 30 فحصاً متتالياً
+                if no_news_counter >= 30:
+                    print("توليد تغريدة طقطقة تاريخية...")
                     banter_prompt = format_spicy_banter_prompt()
                     banter_text = generate_text(gemini_client, banter_prompt)
                     
@@ -227,8 +221,8 @@ def bot_loop() -> None:
         except Exception as e:
             print(f"حدث خطأ في الدورة: {e}")
 
-        # يفحص كل دقيقتين
-        time.sleep(120)
+        # فحص كافي وسريع جداً كل 10 ثوانٍ لمنع الحظر وضمان السرعة
+        time.sleep(10)
 
 
 if __name__ == "__main__":
