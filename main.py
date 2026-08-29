@@ -1,4 +1,4 @@
-"""Fetch news, generate a tweet with Gemini, and log it (X posting bypassed).
+"""Fetch news, generate a tweet with Gemini, and log it continuously without duplicates.
 
 Set the following environment variables before running:
     GEMINI_API_KEY
@@ -9,19 +9,24 @@ Optional:
 """
 
 import os
+import time
 import feedparser
 from google import genai
-import tweepy
 
 DEFAULT_NEWS_FEED_URL = (
     "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
 )
 
+# قائمة لتخزين روابط الأخبار المنشورة سابقة لمنع التكرار
+seen_articles = set()
+
 
 def publish_tweet(tweet: str):
     """Bypass posting to X temporarily to prevent API credit errors."""
+    print("\n----------------------------------------")
     print("[Twitter Disabled] Generated Tweet:")
     print(tweet)
+    print("----------------------------------------\n")
     return True
 
 
@@ -95,13 +100,38 @@ def clean_tweet(tweet: str) -> str:
 
 
 def main() -> None:
-    """Fetch news, generate a tweet, and output it."""
+    """Fetch news continuously and generate tweets without duplicates."""
     gemini_client = create_gemini_client()
     feed_url = os.getenv("NEWS_FEED_URL", DEFAULT_NEWS_FEED_URL)
-    news_items = read_rss_feed(feed_url)
-    tweet = clean_tweet(generate_text(gemini_client, build_tweet_prompt(news_items)))
 
-    publish_tweet(tweet)
+    print("البوت يعمل الآن ويراقب الأخبار الجديدة...")
+
+    while True:
+        try:
+            news_items = read_rss_feed(feed_url)
+            
+            # تصفية الأخبار الجديدة فقط التي لم يتم نشرها سابقاً
+            new_stories = [item for item in news_items if item["link"] not in seen_articles]
+
+            if new_stories:
+                print(f"تم العثور على {len(new_stories)} خبر جديد. جاري المعالجة...")
+                
+                # إنشاء وتجهيز الخبر
+                tweet = clean_tweet(generate_text(gemini_client, build_tweet_prompt(new_stories)))
+                publish_tweet(tweet)
+
+                # إضافة روابط الأخبار المعالجة إلى القائمة لمنع تكرارها
+                for item in new_stories:
+                    seen_articles.add(item["link"])
+            else:
+                print("لا يوجد أخبار جديدة في هذه الدورة. تم تجاوز النشر لمنع التكرار.")
+
+        except Exception as e:
+            print(f"حدث خطأ أثناء التشغيل: {e}")
+
+        # الانتظار لمدة 15 دقيقة (900 ثانية) للتحقق من الأخبار الجديدة
+        print("في انتظار الدورة القادمة بعد 15 دقيقة (900 ثانية)...")
+        time.sleep(900)
 
 
 if __name__ == "__main__":
