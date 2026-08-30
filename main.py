@@ -1,4 +1,4 @@
-"""Al-Hilal News Bot - Fixed Imports & Official Google GenAI SDK
+"""Al-Hilal News Bot - Updated to gemini-3.6-flash
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -97,7 +97,7 @@ def process_with_gemini(client, source_name: str, title: str, summary: str):
 """
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=prompt,
         )
         text = response.text
