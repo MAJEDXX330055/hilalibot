@@ -1,11 +1,9 @@
-"""Al-Hilal & Saudi Football Smart News Bot
+"""Al-Hilal Smart News Bot (Rate-Limit Safe Edition)
 
-Features:
-- Smart Entity Recognition: Extracts player/coach names from news using Gemini.
-- Dynamic Fresh Image Fetching: Searches for fresh, high-quality images of the specific person/player without copyrights.
-- Comprehensive Saudi Football Feeds: Expanded RSS sources covering all major Saudi football updates.
-- Time Filter: Excludes articles older than 4 hours.
-- Gender Filter: Automatically filters out women's sports news.
+Fixes 429 RESOURCE_EXHAUSTED error by:
+1. Combining extraction and news drafting into a single Gemini call.
+2. Increasing sleep time between loop checks to 180 seconds.
+3. Handling API Rate limits gracefully with retry delays.
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -27,14 +25,13 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Hilal Smart Entity & Multi-Source Bot is Active!"
+    return "Hilal Smart Bot (Rate-Limit Safe) is Active!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
 
-# 1. توسيع مصادر الأخبار لتشمل كافة تحركات الشارع الرياضي السعودي
 NEWS_FEEDS = {
     "أخبار الهلال": "https://news.google.com/rss/search?q=%D9%86%D8%A7%D8%AF%D9%8A+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
     "صفقات الهلال والميركاتو": "https://news.google.com/rss/search?q=%D8%B5%D9%81%D9%82%D8%A7%D8%AA+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
@@ -55,39 +52,6 @@ seen_titles = set()
 FEMALE_KEYWORDS = ["سيدات", "النساء", "للنساء", "فريق السيدات", "دوري السيدات", "نسائي"]
 
 
-def extract_person_name(client: genai.Client, text: str) -> str:
-    """استخراج اسم اللاعب أو الشخصية الرياضية الرئيسية من الخبر لطلب صورته."""
-    prompt = f"""من الخبر التالي، استخرج فقط اسم شخصية رياضية رئيسية واحدة (لاعب، مدرب، أو مسؤول) يخصه الخبر بشكل أساسي.
-إذا لم يوجد اسم شخص محدد، اخرج كلمة "الهلال" أو "دوري روشن".
-لا تكتب أي مقدمات أو شرح، اكتب الاسم فقط.
-
-الخبر:
-{text}"""
-    try:
-        model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
-        res = client.models.generate_content(model=model_name, contents=prompt)
-        person_name = res.text.strip().replace("\n", "")
-        return person_name
-    except Exception:
-        return "Al Hilal FC"
-
-
-def fetch_smart_image(search_query: str) -> str:
-    """البحث المباشر عن صورة حديثة عالية الجودة بدلالة اسم اللاعب عبر الإنترنت."""
-    try:
-        # البحث في Unsplash API كمصدر مجاني مفتوح الحقوق
-        query = urllib.parse.quote(f"{search_query} football soccer player")
-        url = f"https://source.unsplash.com/1600x900/?{query}"
-        res = requests.head(url, timeout=5, allow_redirects=True)
-        if res.status_code == 200 and res.url:
-            return res.url
-    except Exception as e:
-        print(f"[تنبيه البحث عن الصور] تعذر جلب صورة مخصصة: {e}", flush=True)
-
-    import random
-    return random.choice(DEFAULT_IMAGES)
-
-
 def is_female_news(text: str) -> bool:
     for keyword in FEMALE_KEYWORDS:
         if keyword in text:
@@ -103,12 +67,65 @@ def is_recent_news(published_parsed) -> bool:
     return (now_dt - published_dt) < timedelta(hours=4)
 
 
+def fetch_smart_image(search_query: str) -> str:
+    try:
+        query = urllib.parse.quote(f"{search_query} football player")
+        url = f"https://source.unsplash.com/1600x900/?{query}"
+        res = requests.head(url, timeout=5, allow_redirects=True)
+        if res.status_code == 200 and res.url:
+            return res.url
+    except Exception:
+        pass
+
+    import random
+    return random.choice(DEFAULT_IMAGES)
+
+
+def create_gemini_client() -> genai.Client:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود.")
+    return genai.Client(api_key=api_key)
+
+
+def process_with_gemini(client: genai.Client, source_name: str, title: str, summary: str):
+    """دمج الطلبين في طلب واحد لتوفير استهلاك الكوتا وحماية البوت من التوقف."""
+    prompt = f"""المصدر: {source_name}
+العنوان: {title}
+التفاصيل: {summary}
+
+المطلوب إخراج النتيجة بتنسيق محدد يفصل بين اسم الشخصية الرياضية ونص المنشور باستخدام الكلمة المفتاحية "---SPLIT---":
+
+السطر الأول: اسم اللاعب أو الشخصية الرياضية المعنية فقط (مثل: مالكوم أو وليد الفراج أو الهلال).
+---SPLIT---
+المنشور:
+صغ المحتوى كـ خبر عاجل أو تصريح حُصري حماسي لمتابعي الكرة السعودية وجماهير الهلال. ابدأ بـ 🚨🚨🚨 | **عاجل:** أو 🎙️ | **تصريح:**
+"""
+    model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+    
+    try:
+        response = client.models.generate_content(model=model_name, contents=prompt)
+        text = response.text
+        if "---SPLIT---" in text:
+            parts = text.split("---SPLIT---")
+            person_name = parts[0].strip()
+            post_text = parts[1].strip()
+            return person_name, post_text
+        else:
+            return "Al Hilal FC", text.strip()
+            
+    except Exception as e:
+        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+            print("[تحذير 429] تجاوز حد API. انتظر 60 ثانية...", flush=True)
+            time.sleep(60)
+        raise e
+
+
 def send_telegram_photo_post(caption_text: str, photo_url: str) -> bool:
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
     if not bot_token or not chat_id:
-        print("[خطأ] مفاتيح تلجرام مفقودة!", flush=True)
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
@@ -123,43 +140,16 @@ def send_telegram_photo_post(caption_text: str, photo_url: str) -> bool:
         response = requests.post(url, json=payload, timeout=15)
         res_data = response.json()
         if res_data.get("ok"):
-            print("[نجاح] تم إرسال الخبر مع صورة الشخصية المعنية بنجاح!", flush=True)
+            print("[نجاح] تم إرسال الخبر بنجاح!", flush=True)
             return True
         else:
-            # صورة احتياطية في حال تعثر رابط الصورة الأولى
             import random
             payload["photo"] = random.choice(DEFAULT_IMAGES)
             requests.post(url, json=payload, timeout=10)
             return True
     except Exception as e:
-        print(f"[خطأ اتصال] تعذر الاتصال بتلجرام: {e}", flush=True)
+        print(f"[خطأ اتصال] تعذر الإرسال: {e}", flush=True)
         return False
-
-
-def create_gemini_client() -> genai.Client:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود.")
-    return genai.Client(api_key=api_key)
-
-
-def generate_text(client: genai.Client, prompt: str) -> str:
-    model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
-    response = client.models.generate_content(model=model_name, contents=prompt)
-    return response.text
-
-
-def build_news_prompt(source_name: str, title: str, summary: str) -> str:
-    return f"""المصدر: {source_name}
-عنوان الخبر أو التصريح: {title}
-تفاصيل الخبر: {summary}
-
-المطلوب:
-1. صغ المحتوى كـ خبر عاجل أو تصريح حُصري موجه لمتابعي الكرة السعودية وجماهير الهلال.
-2. ابدأ المنشور بـ 🚨🚨🚨 | **عاجل:** أو 🎙️ | **تصريح قاطِع:** أو **خبر هلالي:**
-3. اذكر اسم الشخصية الرياضية صراحة وبوضوح داخل النص المنسق.
-4. حافظ على الحماس وتجنب الكلام الإضافي أو المقدمات المكررة.
-"""
 
 
 def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) -> int:
@@ -170,7 +160,7 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
         return 0
 
     sent_count = 0
-    for entry in parsed_feed.entries[:5]:
+    for entry in parsed_feed.entries[:2]:  # فحص أول خبرين فقط لمنع الاستهلاك المفرط
         title = entry.get("title", "").strip()
         summary = entry.get("summary", "").strip()
         published_parsed = entry.get("published_parsed")
@@ -186,24 +176,16 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
             seen_titles.add(title)
             continue
 
-        print(f"[جاري العمل] خبر مقبول: {title[:50]}...", flush=True)
+        print(f"[جاري العمل] خبر جديد: {title[:40]}...", flush=True)
 
-        # 1. تحليل نص الخبر هرمياً لمعرفة اسم الشخصية الرياضية المعنية بالخبر
-        person_name = extract_person_name(gemini_client, f"{title} {summary}")
-        print(f"[ذكاء اصطناعي] تم التعرف على الشخصية: {person_name}", flush=True)
-
-        # 2. البحث عن صورة خاصة ومحدثة للشخصية
-        photo_url = fetch_smart_image(person_name)
-
-        # 3. صياغة المنشور
-        prompt = build_news_prompt(source_key, title, summary)
-        
         try:
-            post_text = generate_text(gemini_client, prompt)
+            person_name, post_text = process_with_gemini(gemini_client, source_key, title, summary)
+            photo_url = fetch_smart_image(person_name)
+
             if send_telegram_photo_post(post_text, photo_url):
                 seen_titles.add(title)
                 sent_count += 1
-                time.sleep(5)  # فاصل زمني لتجنب إغراق القناة
+                time.sleep(15)  # انتظار 15 ثانية بين التغريدات
         except Exception as e:
             print(f"[خطأ معالجة] {e}", flush=True)
 
@@ -213,21 +195,22 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
 def bot_loop() -> None:
     try:
         gemini_client = create_gemini_client()
-        print("[جاهز] تم الاتصال بـ Gemini API بنجاح.", flush=True)
+        print("[جاهز] تم الاتصال بـ Gemini API.", flush=True)
     except Exception as e:
-        print(f"[خطأ قاتل] فشل تهيئة Gemini Client: {e}", flush=True)
+        print(f"[خطأ] {e}", flush=True)
         return
 
-    print("[بدء التشغيل] البوت الذكي يراقب الشارع الرياضي السعودي كاملاً الآن...", flush=True)
+    print("[بدء التشغيل] البوت يعمل الآن بنظام حماية الكوتا الزمني...", flush=True)
 
     while True:
         try:
             for source_key, url in NEWS_FEEDS.items():
                 process_feed(source_key, url, gemini_client)
         except Exception as e:
-            print(f"[خطأ في الدورة] {e}", flush=True)
+            print(f"[خطأ الدورة] {e}", flush=True)
 
-        time.sleep(30)
+        # انتظار 3 دقائق كاملة بين كل دورة فحص للمصادر لحماية الكوتا المجانية
+        time.sleep(180)
 
 
 if __name__ == "__main__":
