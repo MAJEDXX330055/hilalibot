@@ -6,3 +6,4 @@ googlenewsdecoder
 sift-stack-py
 tweepy
 flask
+google-generativeai
