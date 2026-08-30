@@ -1,4 +1,4 @@
-"""Al-Hilal News Bot - Fixed Gemini SDK Implementation
+"""Al-Hilal News Bot - Production Ready Implementation
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 import requests
 from flask import Flask
 import feedparser
-from google import genai
+import google.generativeai as genai
 
 app = Flask(__name__)
 
@@ -76,14 +76,15 @@ def fetch_smart_image(search_query: str) -> str:
     return random.choice(DEFAULT_IMAGES)
 
 
-def create_gemini_client() -> genai.Client:
+def setup_gemini():
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود في متغيرات البيئة.")
-    return genai.Client(api_key=api_key)
+        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود.")
+    genai.configure(api_key=api_key)
+    return genai.GenerativeModel("gemini-1.5-flash")
 
 
-def process_with_gemini(client: genai.Client, source_name: str, title: str, summary: str):
+def process_with_gemini(model, source_name: str, title: str, summary: str):
     prompt = f"""المصدر: {source_name}
 العنوان: {title}
 التفاصيل: {summary}
@@ -96,11 +97,7 @@ def process_with_gemini(client: genai.Client, source_name: str, title: str, summ
 صغ المحتوى كـ خبر عاجل أو تصريح حُصري حماسي لمتابعي الكرة السعودية وجماهير الهلال. ابدأ بـ 🚨🚨🚨 | **عاجل:** أو 🎙️ | **تصريح:**
 """
     try:
-        # استخدام الموديل المعتمد لجيل Gemini 2.5
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt
-        )
+        response = model.generate_content(prompt)
         text = response.text
         if "---SPLIT---" in text:
             parts = text.split("---SPLIT---")
@@ -148,7 +145,7 @@ def send_telegram_photo_post(caption_text: str, photo_url: str) -> bool:
         return False
 
 
-def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) -> int:
+def process_feed(source_key: str, feed_url: str, model) -> int:
     print(f"[فحص] جاري قراءة مصدر: {source_key}", flush=True)
     parsed_feed = feedparser.parse(feed_url)
     
@@ -175,7 +172,7 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
         print(f"[جاري العمل] خبر جديد: {title[:40]}...", flush=True)
 
         try:
-            person_name, post_text = process_with_gemini(gemini_client, source_key, title, summary)
+            person_name, post_text = process_with_gemini(model, source_key, title, summary)
             photo_url = fetch_smart_image(person_name)
 
             if send_telegram_photo_post(post_text, photo_url):
@@ -190,8 +187,8 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
 
 def bot_loop() -> None:
     try:
-        gemini_client = create_gemini_client()
-        print("[جاهز] تم تهيئة Gemini Client بنجاح.", flush=True)
+        model = setup_gemini()
+        print("[جاهز] تم تهيئة Gemini 1.5 Flash بنجاح.", flush=True)
     except Exception as e:
         print(f"[خطأ] فشل التهيئة: {e}", flush=True)
         return
@@ -201,7 +198,7 @@ def bot_loop() -> None:
     while True:
         try:
             for source_key, url in NEWS_FEEDS.items():
-                process_feed(source_key, url, gemini_client)
+                process_feed(source_key, url, model)
         except Exception as e:
             print(f"[خطأ الدورة] {e}", flush=True)
 
