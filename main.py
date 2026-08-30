@@ -1,67 +1,94 @@
-"""Fetch news, generate a tweet with Gemini, and publish it to X.
+"""Al-Hilal News & General Sports Telegram Bot for Replit.
 
-Set the following environment variables before running:
+Fetches news, formats it via Gemini, and publishes directly to Telegram.
 
-    X_CONSUMER_KEY
-    X_CONSUMER_SECRET
-    X_ACCESS_TOKEN
-    X_ACCESS_TOKEN_SECRET
+Set the following Secrets in Replit (Tools -> Secrets):
+    TELEGRAM_BOT_TOKEN
+    TELEGRAM_CHAT_ID
     GEMINI_API_KEY
 
-Optional:
-
-    GEMINI_MODEL (defaults to gemini-3.6-flash)
-    NEWS_FEED_URL (defaults to the Google News top stories RSS feed)
+Optional Secrets:
+    GEMINI_MODEL (defaults to gemini-2.5-flash)
+    NEWS_FEED_URL
 """
 
 import os
-
+import time
+import threading
+import requests
+from flask import Flask
 import feedparser
 from google import genai
-import tweepy
 
+# إعداد خادم Flask لإبقاء البوت يعمل 24/7 على Replit
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Al-Hilal Telegram News Bot is Active & Running 24/7 on Replit!"
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+
+# رابط موجز الأخبار الافتراضي (Google News - أخبار الهلال)
 DEFAULT_NEWS_FEED_URL = (
-    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
+    "https://news.google.com/rss/search?q=%D9%86%D8%A7%D8%AF%D9%8A+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar"
 )
 
-
-def create_x_client() -> tweepy.Client:
-    """Create an X API v2 client using OAuth 1.0a User Context."""
-    return tweepy.Client(
-        consumer_key=os.environ["X_CONSUMER_KEY"],
-        consumer_secret=os.environ["X_CONSUMER_SECRET"],
-        access_token=os.environ["X_ACCESS_TOKEN"],
-        access_token_secret=os.environ["X_ACCESS_TOKEN_SECRET"],
-    )
+seen_posts = set()
 
 
-def publish_tweet(tweet: str) -> tweepy.Response:
-    """Publish a tweet using OAuth 1.0a User Context."""
-    return create_x_client().create_tweet(text=tweet, user_auth=True)
+def send_telegram_post(text: str) -> bool:
+    """إرسال الخبر المنسق مباشرة إلى التلجرام."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+
+    if not bot_token or not chat_id:
+        print("[خطأ] يرجى إضافة TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID في Secrets على Replit")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown"
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=12)
+        res_data = response.json()
+        if res_data.get("ok"):
+            print("تم نشر الخبر بنجاح على التلجرام!")
+            return True
+        else:
+            print(f"فشل الإرسال: {res_data.get('description')}")
+            return False
+    except Exception as e:
+        print(f"حدث خطأ أثناء الاتصال بتلجرام: {e}")
+        return False
 
 
 def create_gemini_client() -> genai.Client:
-    """Create an authenticated Gemini API client."""
-    if not os.environ.get("GEMINI_API_KEY"):
-        raise RuntimeError("Missing required environment variable: GEMINI_API_KEY")
-
-    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    """إنشاء عميل Gemini API."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود في Secrets.")
+    return genai.Client(api_key=api_key)
 
 
 def generate_text(client: genai.Client, prompt: str) -> str:
-    """Generate text with Gemini."""
-    model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+    """توليد النص باستخدام Gemini."""
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     response = client.models.generate_content(model=model_name, contents=prompt)
     return response.text
 
 
 def read_rss_feed(feed_url: str, limit: int = 5) -> list[dict[str, str]]:
-    """Read a feed and return a small, normalized list of entries."""
+    """قراءة موجز RSS وإعادة قائمة المنشورات."""
     parsed_feed = feedparser.parse(feed_url)
     if not parsed_feed.entries:
-        error = getattr(parsed_feed, "bozo_exception", None)
-        detail = f": {error}" if error else ""
-        raise RuntimeError(f"No news entries were found in the RSS feed{detail}")
+        return []
 
     return [
         {
@@ -73,57 +100,56 @@ def read_rss_feed(feed_url: str, limit: int = 5) -> list[dict[str, str]]:
     ]
 
 
-def build_tweet_prompt(news_items: list[dict[str, str]]) -> str:
-    """Build a grounded prompt from the latest news entries."""
-    formatted_items = "\n\n".join(
-        f"Headline: {item['title']}\nSummary: {item['summary']}\nSource: {item['link']}"
-        for item in news_items
-    )
-    return f"""Write one factual tweet about the most significant story below.
+def build_news_prompt(title: str, summary: str) -> str:
+    """بناء التعليمات لـ Gemini لصياغة خبر التلجرام."""
+    return f"""عنوان الخبر: {title}
+تفاصيل الخبر: {summary}
 
-Rules:
-- Return only the tweet text, with no quotation marks, labels, or markdown.
-- Keep it under 260 characters so it can be posted safely to X.
-- Summarize only information present in the supplied headlines or summaries.
-- Do not invent details, statistics, opinions, or quotes.
-- Use a clear, neutral news tone.
-
-Latest news:
-{formatted_items}
+المطلوب:
+1. أعد صياغة الخبر بأسلوب إخباري عاجل ومحترف لمتابعي نادي الهلال.
+2. ابدأ المنشور بـ 🚨🚨🚨 | **عاجل:** أو **خبر هلالي:**
+3. اكتب التفاصيل والأسماء المذكورة بدقة ودون اختصار مخل.
+4. اخرج النص النهائي المنسق فقط بدون أي مقدمات أو شرح إضافي.
 """
 
 
-def clean_tweet(tweet: str) -> str:
-    """Normalize Gemini output and ensure it fits within X's character limit."""
-    cleaned = tweet.strip().replace("\n", " ")
-    if cleaned.startswith("```") and cleaned.endswith("```"):
-        cleaned = cleaned[3:-3].strip()
-    if cleaned.lower().startswith("tweet:"):
-        cleaned = cleaned[6:].strip()
-    cleaned = cleaned.strip("\"'").strip()
+def process_and_publish(gemini_client: genai.Client, feed_url: str) -> None:
+    """فحص الأخبار الجديدة وصياغتها ونشرها."""
+    news_items = read_rss_feed(feed_url)
+    
+    for item in news_items:
+        link = item["link"]
+        if link in seen_posts:
+            continue
 
-    if not cleaned:
-        raise RuntimeError("Gemini returned an empty tweet")
-    if len(cleaned) > 280:
-        cleaned = f"{cleaned[:277].rstrip()}..."
-    return cleaned
+        prompt = build_news_prompt(item["title"], item["summary"])
+        post_text = generate_text(gemini_client, prompt)
+
+        if send_telegram_post(post_text):
+            seen_posts.add(link)
 
 
-def main() -> None:
-    """Fetch news, generate a tweet, and publish it to X."""
+def bot_loop() -> None:
+    """الحلقة التكرارية لفحص الأخبار باستمرار."""
     gemini_client = create_gemini_client()
     feed_url = os.getenv("NEWS_FEED_URL", DEFAULT_NEWS_FEED_URL)
-    news_items = read_rss_feed(feed_url)
-    tweet = clean_tweet(generate_text(gemini_client, build_tweet_prompt(news_items)))
+    print("البوت يعمل الآن على Replit ويتابع الأخبار لنشرها في التلجرام...")
 
-    response = publish_tweet(tweet)
-    tweet_id = response.data.get("id") if response.data else None
-    if not tweet_id:
-        raise RuntimeError("X did not return a tweet ID after publishing")
+    while True:
+        try:
+            process_and_publish(gemini_client, feed_url)
+        except Exception as e:
+            print(f"حدث خطأ أثناء فحص الأخبار: {e}")
 
-    print(f"Published tweet {tweet_id}:")
-    print(tweet)
+        # فحص الأخبار كل 60 ثانية
+        time.sleep(60)
 
 
 if __name__ == "__main__":
-    main()
+    # تشغيل خادم الويب في المسار الخفي (Thread)
+    server_thread = threading.Thread(target=run_web_server)
+    server_thread.daemon = True
+    server_thread.start()
+
+    # تشغيل حلقة البوت الرئيسية
+    bot_loop()
