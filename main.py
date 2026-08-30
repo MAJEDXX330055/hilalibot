@@ -1,8 +1,6 @@
-"""Al-Hilal News Telegram Bot (Render Fixed Version)
+"""Al-Hilal News Telegram Bot (With Environment Keys Verification)
 
-Fixes Google News RSS link processing and adds full console logs.
-
-Required Environment Variables on Render:
+Required Environment Variables on Render (Environment -> Environment Variables):
 - GEMINI_API_KEY
 - TELEGRAM_BOT_TOKEN
 - TELEGRAM_CHAT_ID
@@ -26,6 +24,33 @@ def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
+
+def verify_env_variables():
+    """التحقق المباشر من وجود وقراءة المفاتيح من Render."""
+    print("--- [اختبار فحص المتغيرات والمفاتيح] ---", flush=True)
+    
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+
+    if not bot_token:
+        print("❌ TELEGRAM_BOT_TOKEN: غير موجود!", flush=True)
+    else:
+        print(f"✅ TELEGRAM_BOT_TOKEN: تم القراءة بنجاح ({bot_token[:4]}...{bot_token[-4:]})", flush=True)
+
+    if not chat_id:
+        print("❌ TELEGRAM_CHAT_ID: غير موجود!", flush=True)
+    else:
+        print(f"✅ TELEGRAM_CHAT_ID: تم القراءة بنجاح ({chat_id})", flush=True)
+
+    if not gemini_key:
+        print("❌ GEMINI_API_KEY: غير موجود!", flush=True)
+    else:
+        print(f"✅ GEMINI_API_KEY: تم القراءة بنجاح ({gemini_key[:4]}...{gemini_key[-4:]})", flush=True)
+        
+    print("------------------------------------------", flush=True)
+
+
 NEWS_FEEDS = {
     "أخبار الهلال": "https://news.google.com/rss/search?q=%D9%86%D8%A7%D8%AF%D9%8A+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
     "صفقات الهلال": "https://news.google.com/rss/search?q=%D8%B5%D9%81%D9%82%D8%A7%D8%AA+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
@@ -40,7 +65,7 @@ def send_telegram_post(text: str) -> bool:
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
     if not bot_token or not chat_id:
-        print("[خطأ] TELEGRAM_BOT_TOKEN أو TELEGRAM_CHAT_ID مفقود في متغيرات البيئة!")
+        print("[خطأ] TELEGRAM_BOT_TOKEN أو TELEGRAM_CHAT_ID مفقود!", flush=True)
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -54,13 +79,13 @@ def send_telegram_post(text: str) -> bool:
         response = requests.post(url, json=payload, timeout=12)
         res_data = response.json()
         if res_data.get("ok"):
-            print("[نجاح] تم إرسال الخبر إلى تلجرام بنجاح!")
+            print("[نجاح] تم إرسال الخبر إلى تلجرام بنجاح!", flush=True)
             return True
         else:
-            print(f"[خطأ تلجرام] فشل الإرسال: {res_data.get('description')}")
+            print(f"[خطأ تلجرام] فشل الإرسال: {res_data.get('description')}", flush=True)
             return False
     except Exception as e:
-        print(f"[خطأ اتصال] تعذر الاتصال بتلجرام: {e}")
+        print(f"[خطأ اتصال] تعذر الاتصال بتلجرام: {e}", flush=True)
         return False
 
 
@@ -91,9 +116,11 @@ def build_news_prompt(source_name: str, title: str, summary: str) -> str:
 
 
 def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) -> int:
+    print(f"[فحص] جاري قراءة مصدر: {source_key}", flush=True)
     parsed_feed = feedparser.parse(feed_url)
+    
     if not parsed_feed.entries:
-        print(f"[تنبيه] لم يتم العثور على عناوين في المصدر: {source_key}")
+        print(f"[تنبيه] لم يتم العثور على عناوين في: {source_key}", flush=True)
         return 0
 
     sent_count = 0
@@ -104,7 +131,7 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
         if not title or title in seen_titles:
             continue
 
-        print(f"[جاري العمل] خبر جديد مقبول: {title[:40]}...")
+        print(f"[جاري العمل] خبر جديد: {title[:50]}...", flush=True)
 
         prompt = build_news_prompt(source_key, title, summary)
         
@@ -114,29 +141,31 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
                 seen_titles.add(title)
                 sent_count += 1
         except Exception as e:
-            print(f"[خطأ Gemini] تعذر معالجة الخبر: {e}")
+            print(f"[خطأ Gemini] تعذر معالجة الخبر: {e}", flush=True)
 
     return sent_count
 
 
 def bot_loop() -> None:
+    # طباعة نتائج التأكد من المفاتيح
+    verify_env_variables()
+
     try:
         gemini_client = create_gemini_client()
-        print("[جاهز] تم الاتصال بـ Gemini API بنجاح.")
+        print("[جاهز] تم الاتصال بـ Gemini API بنجاح.", flush=True)
     except Exception as e:
-        print(f"[خطأ قاتل] فشل تهيئة Gemini Client: {e}")
+        print(f"[خطأ قاتل] فشل تهيئة Gemini Client: {e}", flush=True)
         return
 
-    print("[بدء التشغيل] البوت يراقب الأخبار الآن على Render...")
+    print("[بدء التشغيل] البوت يراقب الأخبار الآن...", flush=True)
 
     while True:
         try:
             for source_key, url in NEWS_FEEDS.items():
                 process_feed(source_key, url, gemini_client)
         except Exception as e:
-            print(f"[خطأ في الدورة] {e}")
+            print(f"[خطأ في الدورة] {e}", flush=True)
 
-        # فحص كل 30 ثانية
         time.sleep(30)
 
 
