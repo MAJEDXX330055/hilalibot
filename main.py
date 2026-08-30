@@ -1,4 +1,4 @@
-"""Al-Hilal News Bot - Rate-Limited & Optimized Version
+"""Al-Hilal News Bot - Full Stable & Smart Image Version
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -35,10 +35,18 @@ NEWS_FEEDS = {
 }
 
 DEFAULT_IMAGES = [
+    "https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1080",
     "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=1080",
-    "https://images.unsplash.com/photo-1518091043644-c1d4457512c6?q=80&w=1080",
-    "https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1080"
+    "https://images.unsplash.com/photo-1518091043644-c1d4457512c6?q=80&w=1080"
 ]
+
+MATCH_IMAGES = {
+    "الأهلي": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1080",
+    "النصر": "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=1080",
+    "الاتحاد": "https://images.unsplash.com/photo-1518091043644-c1d4457512c6?q=80&w=1080",
+    "كلاسيكو": "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=1080",
+    "ديربي": "https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1080"
+}
 
 seen_titles = set()
 FEMALE_KEYWORDS = ["سيدات", "النساء", "للنساء", "فريق السيدات", "دوري السيدات", "نسائي"]
@@ -56,13 +64,39 @@ def is_recent_news(published_parsed) -> bool:
     return (now_dt - published_dt) < timedelta(hours=3)
 
 
-def fetch_smart_image(search_query: str) -> str:
+def fetch_image_from_entry(entry) -> str:
+    """استخراج رابط الصورة المرفقة بملف الخبر الأصلي إن وجدت"""
     try:
-        query = urllib.parse.quote(f"{search_query} football player")
-        url = f"https://source.unsplash.com/1600x900/?{query}"
-        res = requests.head(url, timeout=5, allow_redirects=True)
-        if res.status_code == 200 and res.url:
-            return res.url
+        if "media_content" in entry and len(entry.media_content) > 0:
+            return entry.media_content[0].get("url")
+        if "media_thumbnail" in entry and len(entry.media_thumbnail) > 0:
+            return entry.media_thumbnail[0].get("url")
+        if "links" in entry:
+            for link in entry.links:
+                if link.get("type", "").startswith("image/"):
+                    return link.get("href")
+    except Exception:
+        pass
+    return None
+
+
+def fetch_smart_image(text_context: str, entry_image: str = None) -> str:
+    """اختيار صورة مطابقة لمضمون الخبر بدقة"""
+    if entry_image:
+        return entry_image
+
+    for keyword, img_url in MATCH_IMAGES.items():
+        if keyword in text_context:
+            return img_url
+
+    try:
+        clean_query = urllib.parse.quote(f"Al Hilal FC {text_context[:20]}")
+        wiki_url = f"https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsearch={clean_query}&prop=pageimages&pithumbsize=1000&format=json"
+        res = requests.get(wiki_url, timeout=4).json()
+        pages = res.get("query", {}).get("pages", {})
+        for _, val in pages.items():
+            if "thumbnail" in val:
+                return val["thumbnail"]["source"]
     except Exception:
         pass
 
@@ -91,7 +125,7 @@ def process_with_gemini(client, source_name: str, title: str, summary: str):
 """
     try:
         response = client.models.generate_content(
-            model='gemini-3.6-flash',
+            model='gemini-2.5-flash',
             contents=prompt,
         )
         text = response.text
@@ -99,12 +133,12 @@ def process_with_gemini(client, source_name: str, title: str, summary: str):
             parts = text.split("---SPLIT---")
             return parts[0].strip(), parts[1].strip()
         else:
-            return "Al Hilal FC", text.strip()
+            return "الهلال", text.strip()
 
     except Exception as e:
         err_msg = str(e)
         if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "Quota" in err_msg:
-            print("[الكوتا ممتلئة] انتظار انتهاء الحد اليومي أو تجدد الساعات...", flush=True)
+            print("[الكوتا ممتلئة] تخطي مؤقت لحين تجدد الكوتا...", flush=True)
             return None, None
         print(f"[خطأ Gemini] {e}", flush=True)
         return None, None
@@ -155,7 +189,6 @@ def process_single_source(source_key: str, feed_url: str, client) -> bool:
         summary = entry.get("summary", "").strip()
         published_parsed = entry.get("published_parsed")
 
-        # التخطي الفوري قبل الاتصال بـ Gemini لمنع استهلاك API
         if not title or title in seen_titles:
             continue
 
@@ -174,7 +207,9 @@ def process_single_source(source_key: str, feed_url: str, client) -> bool:
         if not post_text:
             continue
 
-        photo_url = fetch_smart_image(person_name)
+        entry_img = fetch_image_from_entry(entry)
+        full_text = f"{title} {summary} {person_name}"
+        photo_url = fetch_smart_image(full_text, entry_img)
 
         if send_telegram_photo_post(post_text, photo_url):
             seen_titles.add(title)
@@ -198,11 +233,10 @@ def bot_loop() -> None:
         try:
             for source_key, url in NEWS_FEEDS.items():
                 process_single_source(source_key, url, client)
-                time.sleep(5)  # فاصل بين المصادر
+                time.sleep(5)
         except Exception as e:
             print(f"[خطأ الدورة] {e}", flush=True)
 
-        # انتظار 5 دقائق كاملة بين كل دورة فحص شاملة
         time.sleep(300)
 
 
