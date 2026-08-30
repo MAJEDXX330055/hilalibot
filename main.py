@@ -1,4 +1,4 @@
-"""Al-Hilal News Bot - Updated to gemini-3.6-flash
+"""Al-Hilal News Bot - Rate Limit (429) & Quota Handling Fix
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -95,6 +95,9 @@ def process_with_gemini(client, source_name: str, title: str, summary: str):
 المنشور:
 صغ المحتوى كـ خبر عاجل أو تصريح حُصري حماسي لمتابعي الكرة السعودية وجماهير الهلال. ابدأ بـ 🚨🚨🚨 | **عاجل:** أو 🎙️ | **تصريح:**
 """
+    # انتظار قصير لتجنب تجاور الطلبات وتجاوز معدل الدقيقة (Rate Limit)
+    time.sleep(5)
+
     try:
         response = client.models.generate_content(
             model='gemini-3.6-flash',
@@ -111,8 +114,10 @@ def process_with_gemini(client, source_name: str, title: str, summary: str):
 
     except Exception as e:
         if "429" in str(e) or "Quota" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-            print("[تنبيه كوتا] تجاوز الحد المؤقت. انتظار 60 ثانية...", flush=True)
-            time.sleep(60)
+            print("[تنبيه كوتا] تم تجاوز الحد المسموح مؤقتاً. الانتظار 25 ثانية...", flush=True)
+            time.sleep(25)
+            # إعادة المحاولة بعد الانتظار
+            return process_with_gemini(client, source_name, title, summary)
         raise e
 
 
