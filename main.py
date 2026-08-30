@@ -1,4 +1,4 @@
-"""Al-Hilal News Bot - Production Ready Implementation
+"""Al-Hilal News Bot - Final API Version Fix
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -80,7 +80,8 @@ def setup_gemini():
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود.")
-    genai.configure(api_key=api_key)
+    # إجبار المكتبة على استخدام API v1 المستقر مباشرة
+    genai.configure(api_key=api_key, client_options={"api_endpoint": "generativelanguage.googleapis.com"})
     return genai.GenerativeModel("gemini-1.5-flash")
 
 
