@@ -1,6 +1,6 @@
-"""Al-Hilal News & General Sports Telegram Bot for Replit.
+"""Al-Hilal News Telegram Bot for Replit.
 
-Fetches news, formats it via Gemini, and publishes directly to Telegram.
+Fetches sports news, formats it via Gemini, and publishes directly to Telegram.
 
 Set the following Secrets in Replit (Tools -> Secrets):
     TELEGRAM_BOT_TOKEN
@@ -20,18 +20,18 @@ from flask import Flask
 import feedparser
 from google import genai
 
-# إعداد خادم Flask لإبقاء البوت يعمل 24/7 على Replit
+# إعداد خادم Flask لإبقاء السكريبت يعمل 24/7 على Replit
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Al-Hilal Telegram News Bot is Active & Running 24/7 on Replit!"
+    return "Al-Hilal Telegram News Bot is Active on Replit!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
 
-# رابط موجز الأخبار الافتراضي (Google News - أخبار الهلال)
+# رابط تغذية أخبار نادي الهلال الافتراضي من Google News
 DEFAULT_NEWS_FEED_URL = (
     "https://news.google.com/rss/search?q=%D9%86%D8%A7%D8%AF%D9%8A+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar"
 )
@@ -40,12 +40,12 @@ seen_posts = set()
 
 
 def send_telegram_post(text: str) -> bool:
-    """إرسال الخبر المنسق مباشرة إلى التلجرام."""
+    """إرسال الخبر المنسق مباشرة إلى قناة/مجموعة التلجرام."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
     if not bot_token or not chat_id:
-        print("[خطأ] يرجى إضافة TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID في Secrets على Replit")
+        print("[خطأ] يرجى إضافة TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID في Secrets")
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -100,29 +100,29 @@ def read_rss_feed(feed_url: str, limit: int = 5) -> list[dict[str, str]]:
     ]
 
 
-def build_news_prompt(title: str, summary: str) -> str:
-    """بناء التعليمات لـ Gemini لصياغة خبر التلجرام."""
-    return f"""عنوان الخبر: {title}
-تفاصيل الخبر: {summary}
+def build_telegram_prompt(news_item: dict[str, str]) -> str:
+    """بناء التعليمات لـ Gemini لصياغة منشور تلجرام إخباري."""
+    return f"""العنوان: {news_item['title']}
+التفاصيل: {news_item['summary']}
 
 المطلوب:
-1. أعد صياغة الخبر بأسلوب إخباري عاجل ومحترف لمتابعي نادي الهلال.
+1. صغ منشوراً إخبارياً عاجلاً يخص نادي الهلال باللغة العربية.
 2. ابدأ المنشور بـ 🚨🚨🚨 | **عاجل:** أو **خبر هلالي:**
-3. اكتب التفاصيل والأسماء المذكورة بدقة ودون اختصار مخل.
-4. اخرج النص النهائي المنسق فقط بدون أي مقدمات أو شرح إضافي.
+3. حافظ على الدقة وجميع الأسماء المذكورة بدون اختصار مخل.
+4. استخدم التنسيق المباشر والرموز التعبيرية المناسبة بدون أي مقدمات أو شرح إضافي.
 """
 
 
 def process_and_publish(gemini_client: genai.Client, feed_url: str) -> None:
     """فحص الأخبار الجديدة وصياغتها ونشرها."""
     news_items = read_rss_feed(feed_url)
-    
+
     for item in news_items:
         link = item["link"]
         if link in seen_posts:
             continue
 
-        prompt = build_news_prompt(item["title"], item["summary"])
+        prompt = build_telegram_prompt(item)
         post_text = generate_text(gemini_client, prompt)
 
         if send_telegram_post(post_text):
@@ -130,10 +130,10 @@ def process_and_publish(gemini_client: genai.Client, feed_url: str) -> None:
 
 
 def bot_loop() -> None:
-    """الحلقة التكرارية لفحص الأخبار باستمرار."""
+    """الحلقة التكرارية للفحص الدوري المستمر."""
     gemini_client = create_gemini_client()
     feed_url = os.getenv("NEWS_FEED_URL", DEFAULT_NEWS_FEED_URL)
-    print("البوت يعمل الآن على Replit ويتابع الأخبار لنشرها في التلجرام...")
+    print("البوت يعمل الآن على Replit وجاهز لنشر أخبار الهلال على التلجرام...")
 
     while True:
         try:
@@ -146,7 +146,7 @@ def bot_loop() -> None:
 
 
 if __name__ == "__main__":
-    # تشغيل خادم الويب في المسار الخفي (Thread)
+    # تشغيل خادم الويب في مسار خلفي (Thread) لإبقاء Replit نشطاً
     server_thread = threading.Thread(target=run_web_server)
     server_thread.daemon = True
     server_thread.start()
