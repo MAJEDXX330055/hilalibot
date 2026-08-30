@@ -1,4 +1,4 @@
-"""Al-Hilal News Bot (~1400 Daily Quota Engine - API Route Fixed)
+"""Al-Hilal News Bot (~1400 Daily Quota Engine - Fixed Model Path)
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -15,7 +15,6 @@ import requests
 from flask import Flask
 import feedparser
 from google import genai
-from google.genai import types
 
 app = Flask(__name__)
 
@@ -81,8 +80,7 @@ def create_gemini_client() -> genai.Client:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود.")
-    # إجبار العميل على استخدام الإصدار v1 لمنع خطأ 404 المخصص بـ v1beta
-    return genai.Client(api_key=api_key, http_options=types.HttpOptions(api_version="v1"))
+    return genai.Client(api_key=api_key)
 
 
 def process_with_gemini(client: genai.Client, source_name: str, title: str, summary: str):
@@ -97,7 +95,8 @@ def process_with_gemini(client: genai.Client, source_name: str, title: str, summ
 المنشور:
 صغ المحتوى كـ خبر عاجل أو تصريح حُصري حماسي لمتابعي الكرة السعودية وجماهير الهلال. ابدأ بـ 🚨🚨🚨 | **عاجل:** أو 🎙️ | **تصريح:**
 """
-    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    # المسار الكامل للموديل المعتمد لـ SDK الجديد
+    model_name = os.getenv("GEMINI_MODEL", "models/gemini-2.5-flash")
     
     try:
         response = client.models.generate_content(model=model_name, contents=prompt)
