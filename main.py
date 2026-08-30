@@ -1,4 +1,4 @@
-"""Al-Hilal News Bot - Anti-Crash & Quota Bypass Version
+"""Al-Hilal News Bot - Rate-Limited & Optimized Version
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -30,11 +30,8 @@ def run_web_server():
 NEWS_FEEDS = {
     "أخبار الهلال": "https://news.google.com/rss/search?q=%D9%86%D8%A7%D8%AF%D9%8A+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
     "صفقات الهلال والميركاتو": "https://news.google.com/rss/search?q=%D8%B5%D9%81%D9%82%D8%A7%D8%AA+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
-    "دوري روشن السعودي": "https://news.google.com/rss/search?q=%D8%AF%D9%88%D8%B1%D9%8A+%D8%B1%D9%88%D8%B4%D9%86+%D8%A7%D9%84%D8%B3%D8%B9%D9%88%D8%AF%D9%8A&hl=ar&gl=SA&ceid=SA:ar",
     "تصريحات أكشن مع وليد": "https://news.google.com/rss/search?q=%D8%A3%D9%83%D8%B4%D9%86+%D9%85%D8%B9+%D9%88%D9%84%D9%8A%D8%AF&hl=ar&gl=SA&ceid=SA:ar",
-    "البرامج الرياضية السعودية": "https://news.google.com/rss/search?q=%D8%AA%D8%B5%D8%B1%D9%8A%D8%AD%D8%A7%D8%AA+%D8%A7%D9%84%D9%81%D8%B1%D8%A7%D8%AC+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
-    "أخبار كورة سعودية شاملة": "https://news.google.com/rss/search?q=%D9%83%D8%B1%D8%A9+%D8%A7%D9%84%D9%82%D8%AF%D9%85+%D8%A7%D9%84%D8%B3%D8%B9%D9%88%D8%AF%D9%8A%D8%A9&hl=ar&gl=SA&ceid=SA:ar",
-    "المنتخب السعودي": "https://news.google.com/rss/search?q=%D8%A7%D9%84%D9%85%D9%86%D8%AA%D8%AE%D8%A8+%D8%A7%D9%84%D8%B3%D8%B9%D9%88%D8%AF%D9%8A&hl=ar&gl=SA&ceid=SA:ar"
+    "دوري روشن السعودي": "https://news.google.com/rss/search?q=%D8%AF%D9%88%D8%B1%D9%8A+%D8%B1%D9%88%D8%B4%D9%86+%D8%A7%D9%84%D8%B3%D8%B9%D9%88%D8%AF%D9%8A&hl=ar&gl=SA&ceid=SA:ar"
 }
 
 DEFAULT_IMAGES = [
@@ -48,10 +45,7 @@ FEMALE_KEYWORDS = ["سيدات", "النساء", "للنساء", "فريق ال�
 
 
 def is_female_news(text: str) -> bool:
-    for keyword in FEMALE_KEYWORDS:
-        if keyword in text:
-            return True
-    return False
+    return any(keyword in text for keyword in FEMALE_KEYWORDS)
 
 
 def is_recent_news(published_parsed) -> bool:
@@ -59,7 +53,7 @@ def is_recent_news(published_parsed) -> bool:
         return True
     published_dt = datetime(*published_parsed[:6], tzinfo=timezone.utc)
     now_dt = datetime.now(timezone.utc)
-    return (now_dt - published_dt) < timedelta(hours=4)
+    return (now_dt - published_dt) < timedelta(hours=3)
 
 
 def fetch_smart_image(search_query: str) -> str:
@@ -79,7 +73,7 @@ def fetch_smart_image(search_query: str) -> str:
 def setup_gemini_client():
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود في متغيرات البيئة.")
+        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود.")
     return genai.Client(api_key=api_key)
 
 
@@ -103,16 +97,14 @@ def process_with_gemini(client, source_name: str, title: str, summary: str):
         text = response.text
         if "---SPLIT---" in text:
             parts = text.split("---SPLIT---")
-            person_name = parts[0].strip()
-            post_text = parts[1].strip()
-            return person_name, post_text
+            return parts[0].strip(), parts[1].strip()
         else:
             return "Al Hilal FC", text.strip()
 
     except Exception as e:
         err_msg = str(e)
         if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "Quota" in err_msg:
-            print("[تخطي الكوتا] تم الوصول للحد المسموح، التخطي الفوري للمصدر التالي...", flush=True)
+            print("[الكوتا ممتلئة] انتظار انتهاء الحد اليومي أو تجدد الساعات...", flush=True)
             return None, None
         print(f"[خطأ Gemini] {e}", flush=True)
         return None, None
@@ -123,7 +115,6 @@ def send_telegram_photo_post(caption_text: str, photo_url: str) -> bool:
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
     if not bot_token or not chat_id:
-        print("[خطأ] بيانات تلجرام غير مكتملة.", flush=True)
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
@@ -146,26 +137,25 @@ def send_telegram_photo_post(caption_text: str, photo_url: str) -> bool:
             requests.post(url, json=payload, timeout=10)
             return True
     except Exception as e:
-        print(f"[خطأ اتصال] تعذر الإرسال: {e}", flush=True)
+        print(f"[خطأ اتصال] {e}", flush=True)
         return False
 
 
 def process_single_source(source_key: str, feed_url: str, client) -> bool:
-    print(f"[فحص المصدر] جاري قراءة: {source_key}", flush=True)
     try:
         parsed_feed = feedparser.parse(feed_url)
-    except Exception as e:
-        print(f"[خطأ قراءة المصدر] {e}", flush=True)
+    except Exception:
         return False
     
     if not parsed_feed.entries:
         return False
 
-    for entry in parsed_feed.entries[:3]:
+    for entry in parsed_feed.entries[:2]:
         title = entry.get("title", "").strip()
         summary = entry.get("summary", "").strip()
         published_parsed = entry.get("published_parsed")
 
+        # التخطي الفوري قبل الاتصال بـ Gemini لمنع استهلاك API
         if not title or title in seen_titles:
             continue
 
@@ -177,20 +167,18 @@ def process_single_source(source_key: str, feed_url: str, client) -> bool:
             seen_titles.add(title)
             continue
 
-        print(f"[معالجة] خبر جديد: {title[:40]}...", flush=True)
+        print(f"[خبر جديد] جاري التلخيص: {title[:35]}...", flush=True)
 
         person_name, post_text = process_with_gemini(client, source_key, title, summary)
         
-        # تخطي الخبر فوراً إذا فشل توليده بسبب الكوتا أو أي خطأ آخر
         if not post_text:
-            seen_titles.add(title)
             continue
 
         photo_url = fetch_smart_image(person_name)
 
         if send_telegram_photo_post(post_text, photo_url):
             seen_titles.add(title)
-            time.sleep(5)
+            time.sleep(10)
             return True
 
     return False
@@ -199,22 +187,23 @@ def process_single_source(source_key: str, feed_url: str, client) -> bool:
 def bot_loop() -> None:
     try:
         client = setup_gemini_client()
-        print("[جاهز] تم تهيئة SDK بنجاح.", flush=True)
+        print("[جاهز] تم الاتصال بالـ SDK.", flush=True)
     except Exception as e:
-        print(f"[خطأ حرِج] فشل التهيئة: {e}", flush=True)
+        print(f"[خطأ] {e}", flush=True)
         return
 
-    print("[بدء التشغيل] البوت يعمل الآن بشكل مستقر...", flush=True)
+    print("[تشغيل متوازن] البوت يفحص كل 5 دقائق لمنع نفاد الكوتا...", flush=True)
 
     while True:
         try:
             for source_key, url in NEWS_FEEDS.items():
                 process_single_source(source_key, url, client)
-                time.sleep(3)
+                time.sleep(5)  # فاصل بين المصادر
         except Exception as e:
             print(f"[خطأ الدورة] {e}", flush=True)
 
-        time.sleep(15)
+        # انتظار 5 دقائق كاملة بين كل دورة فحص شاملة
+        time.sleep(300)
 
 
 if __name__ == "__main__":
