@@ -1,9 +1,8 @@
-"""Al-Hilal News Telegram Bot (With Images & Fresh News Filter)
+"""Al-Hilal News & Statements Bot (Sports TV Shows Edition)
 
-- Filters news to only publish articles from the last 3 hours.
-- Attaches high-quality images to every Telegram post.
-- Excludes women's sports news automatically.
-- Uses gemini-3.6-flash.
+Fetches breaking news and spicy TV show statements (e.g. Action With Waleed).
+Filters out older news (> 4 hours) and women's sports.
+Uses gemini-3.6-flash.
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -24,20 +23,23 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Hilal News Bot is Active on Render!"
+    return "Hilal News & Statements Bot is Active on Render!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
 
+# مصادر الأخبار والتصريحات القوية من البرامج الرياضية
 NEWS_FEEDS = {
     "أخبار الهلال": "https://news.google.com/rss/search?q=%D9%86%D8%A7%D8%AF%D9%8A+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
-    "صفقات الهلال": "https://news.google.com/rss/search?q=%D8%B5%D9%81%D9%82%D8%A7%D8%AA+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
-    "دوري روشن": "https://news.google.com/rss/search?q=%D8%AF%D9%88%D8%B1%D9%8A+%D8%B1%D9%88%D8%B4%D9%86&hl=ar&gl=SA&ceid=SA:ar"
+    "صفقات الهلال والميركاتو": "https://news.google.com/rss/search?q=%D8%B5%D9%81%D9%82%D8%A7%D8%AA+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
+    "دوري روشن السعودي": "https://news.google.com/rss/search?q=%D8%AF%D9%88%D8%B1%D9%8A+%D8%B1%D9%88%D8%B4%D9%86&hl=ar&gl=SA&ceid=SA:ar",
+    "تصريحات أكشن مع وليد": "https://news.google.com/rss/search?q=%D8%A3%D9%83%D8%B4%D9%86+%D9%85%D8%B9+%D9%88%D9%84%D9%8A%D8%AF+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
+    "تصريحات البرامج الرياضية": "https://news.google.com/rss/search?q=%D8%AA%D8%B5%D8%B1%D9%8A%D8%AD%D8%A7%D8%AA+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84+%D9%88%D9%84%D9%8A%D8%AF+%D8%A7%D9%84%D9%81%D8%B1%D8%A7%D8%AC&hl=ar&gl=SA&ceid=SA:ar",
+    "صحيفة الرياضية": "https://news.google.com/rss/search?q=%D8%B5%D8%AD%D9%8A%D9%81%D8%A9+%D8%A7%D9%84%D8%B1%D9%8A%D8%A7%D8%B6%D9%8A%D8%A9+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar"
 }
 
-# مكتبة صور هلالية ورياضية عالية الجودة بديلة لإرفاقها مع الأخبار
 DEFAULT_IMAGES = [
     "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=1080",
     "https://images.unsplash.com/photo-1518091043644-c1d4457512c6?q=80&w=1080",
@@ -57,20 +59,18 @@ def is_female_news(text: str) -> bool:
 
 
 def is_recent_news(published_parsed) -> bool:
-    """التحقق مما إذا كان عمر الخبر أقل من 3 ساعات."""
     if not published_parsed:
-        return True # في حال عدم توفر التاريخ، نمرره احترازيًا
+        return True
     
     published_dt = datetime(*published_parsed[:6], tzinfo=timezone.utc)
     now_dt = datetime.now(timezone.utc)
-    
-    # حساب الفرق بالساعات
     time_diff = now_dt - published_dt
-    return time_diff < timedelta(hours=3)
+    
+    # قبول التحديثات من آخر 4 ساعات
+    return time_diff < timedelta(hours=4)
 
 
 def send_telegram_photo_post(caption_text: str) -> bool:
-    """إرسال الخبر كـ صورة عالية الجودة مع نص تشويقي."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -78,7 +78,6 @@ def send_telegram_photo_post(caption_text: str) -> bool:
         print("[خطأ] TELEGRAM_BOT_TOKEN أو TELEGRAM_CHAT_ID مفقود!", flush=True)
         return False
 
-    # اختيار صورة عشوائية عالية الجودة من القائمة
     import random
     photo_url = random.choice(DEFAULT_IMAGES)
 
@@ -94,7 +93,7 @@ def send_telegram_photo_post(caption_text: str) -> bool:
         response = requests.post(url, json=payload, timeout=15)
         res_data = response.json()
         if res_data.get("ok"):
-            print("[نجاح] تم إرسال الخبر بالصورة إلى تلجرام بنجاح!", flush=True)
+            print("[نجاح] تم إرسال الخبر المصور إلى تلجرام بنجاح!", flush=True)
             return True
         else:
             print(f"[خطأ تلجرام] فشل الإرسال: {res_data.get('description')}", flush=True)
@@ -119,15 +118,14 @@ def generate_text(client: genai.Client, prompt: str) -> str:
 
 def build_news_prompt(source_name: str, title: str, summary: str) -> str:
     return f"""المصدر: {source_name}
-عنوان الخبر: {title}
+عنوان الخبر أو التصريح: {title}
 تفاصيل الخبر: {summary}
 
 المطلوب:
-1. صغ المنشور كـ خبر عاجل مخصص لمتابعي نادي الهلال والكرة السعودية للرجال.
-2. ابدأ المنشور بـ 🚨🚨🚨 | **عاجل:** أو **خبر هلالي:**
-3. اكتب التفاصيل والأسماء المذكورة بوضوح ودون اختصار.
-4. اجعل النص مناسبًا كشرح لصورة (Caption).
-5. اخرج النص النهائي المنسق فقط بدون أي مقدمات أو كلام إضافي.
+1. إذا كان المحتوى تصريحًا تلفزيونيًا أو إعلاميًا (مثل وليد الفراج أو ضيوف البرامج)، صغه بأسلوب: 🎙️ | **تصريح مثير:** أو 🎙️ | **وليد الفراج / البرامج الرياضية:**
+2. إذا كان خبرًا رياضيًا أو صفقة، ابدأ المنشور بـ 🚨🚨🚨 | **عاجل:** أو **خبر هلالي:**
+3. ركز على إبراز الجمل القوية والمثيرة في التصريح دون تحريف المعنى، وبصياغة فخمة تناسب جماهير الهلال.
+4. اخرج النص النهائي المنسق فقط بدون أي مقدمات أو شرح إضافي.
 """
 
 
@@ -148,19 +146,17 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
         if not title or title in seen_titles:
             continue
 
-        # 1. استبعاد الأخبار النسائية
         if is_female_news(title) or is_female_news(summary):
             print(f"[تجاهل] تم استبعاد خبر نسائي: {title[:40]}...", flush=True)
             seen_titles.add(title)
             continue
 
-        # 2. استبعاد الأخبار القديمة (أكثر من 3 ساعات)
         if not is_recent_news(published_parsed):
-            print(f"[تجاهل] خبر قديم (تجاوز 3 ساعات): {title[:40]}...", flush=True)
+            print(f"[تجاهل] خبر قديم: {title[:40]}...", flush=True)
             seen_titles.add(title)
             continue
 
-        print(f"[جاري العمل] خبر جديد وعاجل مقبول: {title[:50]}...", flush=True)
+        print(f"[جاري العمل] خبر/تصريح جديد مقبول: {title[:50]}...", flush=True)
 
         prompt = build_news_prompt(source_key, title, summary)
         
@@ -170,7 +166,7 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
                 seen_titles.add(title)
                 sent_count += 1
         except Exception as e:
-            print(f"[خطأ Gemini] تعذر معالجة الخبر: {e}", flush=True)
+            print(f"[خطأ Gemini] تعذر معالجة المحتوى: {e}", flush=True)
 
     return sent_count
 
@@ -183,7 +179,7 @@ def bot_loop() -> None:
         print(f"[خطأ قاتل] فشل تهيئة Gemini Client: {e}", flush=True)
         return
 
-    print("[بدء التشغيل] البوت يراقب الأخبار الحديثة المصورة الآن على Render...", flush=True)
+    print("[بدء التشغيل] البوت يراقب الأخبار والتصريحات الرياضية المباشرة الآن...", flush=True)
 
     while True:
         try:
