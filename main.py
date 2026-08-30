@@ -16,7 +16,6 @@ def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# إعدادات مصادر الأخبار الخاصة بك
 NEWS_FEEDS = {
     "أخبار الهلال": "https://news.google.com/rss/search?q=%D9%86%D8%A7%D8%AF%D9%8A%20%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
     "صفقات الهلال والميركاتو": "https://news.google.com/rss/search?q=%D8%B5%D9%81%D9%82%D8%A7%D8%AA%20%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
@@ -45,28 +44,34 @@ FEMALE_KEYWORDS = ["النساء", "للنساء", "فريق السيدات", "�
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
 def fetch_and_publish():
-    """دالة الفحص باستخدام مصادر وقواميس كودك الأصلي"""
     print("=== [بدء عملية فحص المصادر] ===")
     try:
         model = genai.GenerativeModel("gemini-1.5-flash")
     except Exception as e:
-        print(f"[خطأ في إعداد نموذج Gemini]: {e}")
+        print(f"[خطأ في تهيئة Gemini]: {e}")
         return
+
+    # إعداد متصفح وهمي لتجاوز حجب Google News
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    }
 
     for category, feed_url in NEWS_FEEDS.items():
         try:
-            print(f"جاري فحص تصنيف ({category}): {feed_url}")
-            feed = feedparser.parse(feed_url)
+            print(f"جاري فحص تصنيف ({category})...")
+            
+            # جلب محتوى الـ RSS عبر requests مع تحديد وقت انتظار (Timeout)
+            response = requests.get(feed_url, headers=headers, timeout=10)
+            feed = feedparser.parse(response.content)
             
             if not feed.entries:
-                print(f"لا توجد أخبار جديدة في ({category})")
+                print(f"لا توجد عناصر جديدة في ({category})")
                 continue
                 
-            for entry in feed.entries[:3]:
+            for entry in feed.entries[:2]:
                 title = entry.title
                 link = entry.link
                 
-                # استبعاد أية أخبار تحتوي على الكلمات النسائية
                 if any(keyword in title for keyword in FEMALE_KEYWORDS):
                     print(f"تم استبعاد خبر نسائي: {title}")
                     continue
@@ -76,40 +81,40 @@ def fetch_and_publish():
                     continue
                 
                 seen_titles.add(title)
-                print(f"خبر جديد! جاري التلخيص: {title}")
+                print(f"خبر جديد ينفذ الآن: {title}")
                 
                 # تلخيص الخبر
                 prompt = f"لخص هذا الخبر الرياضي بشكل جذاب وقصير للتليجرام:\nالعنوان: {title}"
-                response = model.generate_content(prompt)
-                summary = response.text if response else title
+                res = model.generate_content(prompt)
+                summary = res.text if res else title
                 
                 # الإرسال للتليجرام
                 bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
                 chat_id = os.environ.get("TELEGRAM_CHAT_ID")
                 
                 if bot_token and chat_id:
-                    message = f"<b>[{category}] {title}</b>\n\n{summary}\n\n🔗 <a href='{link}'>المصدر</a>"
+                    message = f"<b>[{category}]</b>\n\n{summary}\n\n🔗 <a href='{link}'>المصدر</a>"
                     requests.post(
                         f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+                        data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+                        timeout=10
                     )
                     print(f"[نجاح] تم إرسال الخبر: {title}")
                     
         except Exception as e:
-            print(f"[خطأ في التصنيف {category}]: {e}")
+            print(f"[خطأ في ({category})]: {e}")
             continue
-    print("=== [انتهى الفحص] ===")
+            
+    print("=== [انتهى الفحص بنجاح] ===")
 
 def start_loop():
-    """تفعيل الفحص المستمر كل 10 دقائق في الخلفية"""
+    # انتظار 10 ثوانٍ لضمان إقلاع سيرفر Flask أولاً
+    time.sleep(10)
     while True:
         fetch_and_publish()
-        time.sleep(600)
+        time.sleep(600)  # الفحص كل 10 دقائق
 
 if __name__ == "__main__":
-    # تشغيل حلقة الفحص في الخلفية
     bot_thread = threading.Thread(target=start_loop, daemon=True)
     bot_thread.start()
-    
-    # تشغيل السيرفر
     run_web_server()
