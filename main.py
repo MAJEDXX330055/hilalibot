@@ -125,7 +125,7 @@ def process_with_gemini(client, source_name: str, title: str, summary: str):
 """
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=prompt,
         )
         text = response.text
