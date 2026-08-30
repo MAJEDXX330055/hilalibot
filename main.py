@@ -1,7 +1,9 @@
-"""Al-Hilal News Telegram Bot (Fixed Gemini Model & Filtered News)
+"""Al-Hilal News Telegram Bot (With Images & Fresh News Filter)
 
-Fixes 404 NOT_FOUND error by updating model to gemini-3.6-flash.
-Excludes women's sports news automatically.
+- Filters news to only publish articles from the last 3 hours.
+- Attaches high-quality images to every Telegram post.
+- Excludes women's sports news automatically.
+- Uses gemini-3.6-flash.
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -12,6 +14,7 @@ Required Environment Variables on Render:
 import os
 import time
 import threading
+from datetime import datetime, timezone, timedelta
 import requests
 from flask import Flask
 import feedparser
@@ -34,21 +37,40 @@ NEWS_FEEDS = {
     "دوري روشن": "https://news.google.com/rss/search?q=%D8%AF%D9%88%D8%B1%D9%8A+%D8%B1%D9%88%D8%B4%D9%86&hl=ar&gl=SA&ceid=SA:ar"
 }
 
-seen_titles = set()
+# مكتبة صور هلالية ورياضية عالية الجودة بديلة لإرفاقها مع الأخبار
+DEFAULT_IMAGES = [
+    "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=1080",
+    "https://images.unsplash.com/photo-1518091043644-c1d4457512c6?q=80&w=1080",
+    "https://images.unsplash.com/photo-1574629810360-7efbbe195018?q=80&w=1080",
+    "https://images.unsplash.com/photo-1522778119026-d647f0596c20?q=80&w=1080"
+]
 
-# الكلمات المفتاحية المخصصة لاستبعاد الأخبار النسائية
+seen_titles = set()
 FEMALE_KEYWORDS = ["سيدات", "النساء", "للنساء", "فريق السيدات", "دوري السيدات", "نسائي"]
 
 
 def is_female_news(text: str) -> bool:
-    """التحقق مما إذا كان الخبر يتعلق بالرياضة النسائية لاستبعاده."""
     for keyword in FEMALE_KEYWORDS:
         if keyword in text:
             return True
     return False
 
 
-def send_telegram_post(text: str) -> bool:
+def is_recent_news(published_parsed) -> bool:
+    """التحقق مما إذا كان عمر الخبر أقل من 3 ساعات."""
+    if not published_parsed:
+        return True # في حال عدم توفر التاريخ، نمرره احترازيًا
+    
+    published_dt = datetime(*published_parsed[:6], tzinfo=timezone.utc)
+    now_dt = datetime.now(timezone.utc)
+    
+    # حساب الفرق بالساعات
+    time_diff = now_dt - published_dt
+    return time_diff < timedelta(hours=3)
+
+
+def send_telegram_photo_post(caption_text: str) -> bool:
+    """إرسال الخبر كـ صورة عالية الجودة مع نص تشويقي."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -56,18 +78,23 @@ def send_telegram_post(text: str) -> bool:
         print("[خطأ] TELEGRAM_BOT_TOKEN أو TELEGRAM_CHAT_ID مفقود!", flush=True)
         return False
 
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    # اختيار صورة عشوائية عالية الجودة من القائمة
+    import random
+    photo_url = random.choice(DEFAULT_IMAGES)
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
     payload = {
         "chat_id": chat_id,
-        "text": text,
+        "photo": photo_url,
+        "caption": caption_text,
         "parse_mode": "Markdown"
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=12)
+        response = requests.post(url, json=payload, timeout=15)
         res_data = response.json()
         if res_data.get("ok"):
-            print("[نجاح] تم إرسال الخبر إلى تلجرام بنجاح!", flush=True)
+            print("[نجاح] تم إرسال الخبر بالصورة إلى تلجرام بنجاح!", flush=True)
             return True
         else:
             print(f"[خطأ تلجرام] فشل الإرسال: {res_data.get('description')}", flush=True)
@@ -85,7 +112,6 @@ def create_gemini_client() -> genai.Client:
 
 
 def generate_text(client: genai.Client, prompt: str) -> str:
-    # استخدام موديل gemini-3.6-flash الصحيح والمحدث
     model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     response = client.models.generate_content(model=model_name, contents=prompt)
     return response.text
@@ -100,7 +126,8 @@ def build_news_prompt(source_name: str, title: str, summary: str) -> str:
 1. صغ المنشور كـ خبر عاجل مخصص لمتابعي نادي الهلال والكرة السعودية للرجال.
 2. ابدأ المنشور بـ 🚨🚨🚨 | **عاجل:** أو **خبر هلالي:**
 3. اكتب التفاصيل والأسماء المذكورة بوضوح ودون اختصار.
-4. اخرج النص النهائي المنسق فقط بدون أي مقدمات أو كلام إضافي.
+4. اجعل النص مناسبًا كشرح لصورة (Caption).
+5. اخرج النص النهائي المنسق فقط بدون أي مقدمات أو كلام إضافي.
 """
 
 
@@ -116,23 +143,30 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
     for entry in parsed_feed.entries[:5]:
         title = entry.get("title", "").strip()
         summary = entry.get("summary", "").strip()
+        published_parsed = entry.get("published_parsed")
 
         if not title or title in seen_titles:
             continue
 
-        # فلترة واستبعاد الأخبار النسائية
+        # 1. استبعاد الأخبار النسائية
         if is_female_news(title) or is_female_news(summary):
             print(f"[تجاهل] تم استبعاد خبر نسائي: {title[:40]}...", flush=True)
             seen_titles.add(title)
             continue
 
-        print(f"[جاري العمل] خبر جديد مقبول: {title[:50]}...", flush=True)
+        # 2. استبعاد الأخبار القديمة (أكثر من 3 ساعات)
+        if not is_recent_news(published_parsed):
+            print(f"[تجاهل] خبر قديم (تجاوز 3 ساعات): {title[:40]}...", flush=True)
+            seen_titles.add(title)
+            continue
+
+        print(f"[جاري العمل] خبر جديد وعاجل مقبول: {title[:50]}...", flush=True)
 
         prompt = build_news_prompt(source_key, title, summary)
         
         try:
             post_text = generate_text(gemini_client, prompt)
-            if send_telegram_post(post_text):
+            if send_telegram_photo_post(post_text):
                 seen_titles.add(title)
                 sent_count += 1
         except Exception as e:
@@ -144,12 +178,12 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
 def bot_loop() -> None:
     try:
         gemini_client = create_gemini_client()
-        print("[جاهز] تم الاتصال بـ Gemini API بنجاح باستخدام gemini-3.6-flash.", flush=True)
+        print("[جاهز] تم الاتصال بـ Gemini API بنجاح.", flush=True)
     except Exception as e:
         print(f"[خطأ قاتل] فشل تهيئة Gemini Client: {e}", flush=True)
         return
 
-    print("[بدء التشغيل] البوت يراقب الأخبار الآن على Render...", flush=True)
+    print("[بدء التشغيل] البوت يراقب الأخبار الحديثة المصورة الآن على Render...", flush=True)
 
     while True:
         try:
