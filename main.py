@@ -1,9 +1,4 @@
-"""Al-Hilal News Bot (~1400 Daily Quota Engine - Fixed SDK Imports)
-
-Configured to utilize ~1,400 daily API calls with a 100-request safety buffer:
-- Uses google.genai client properly.
-- Checks feeds with a 60-second delay between full cycles.
-- Processes up to 3 fresh items per feed with 15s delay between requests.
+"""Al-Hilal News Bot (~1400 Daily Quota Engine - Model Fixed)
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -100,7 +95,8 @@ def process_with_gemini(client: genai.Client, source_name: str, title: str, summ
 المنشور:
 صغ المحتوى كـ خبر عاجل أو تصريح حُصري حماسي لمتابعي الكرة السعودية وجماهير الهلال. ابدأ بـ 🚨🚨🚨 | **عاجل:** أو 🎙️ | **تصريح:**
 """
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    # استخدام الموديل المستقر gemini-1.5-flash لمنع خطأ 404
+    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
     
     try:
         response = client.models.generate_content(model=model_name, contents=prompt)
