@@ -1,4 +1,4 @@
-"""Al-Hilal News Bot - Official Google GenAI SDK Implementation
+"""Al-Hilal News Bot - Fixed Imports & Official Google GenAI SDK
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
