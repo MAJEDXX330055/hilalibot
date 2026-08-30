@@ -1,4 +1,4 @@
-"""Al-Hilal News Bot - Rate Limit (429) & Quota Handling Fix
+"""Al-Hilal News Bot - Rate Limit Safe & Source-by-Source Queue
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -95,9 +95,6 @@ def process_with_gemini(client, source_name: str, title: str, summary: str):
 المنشور:
 صغ المحتوى كـ خبر عاجل أو تصريح حُصري حماسي لمتابعي الكرة السعودية وجماهير الهلال. ابدأ بـ 🚨🚨🚨 | **عاجل:** أو 🎙️ | **تصريح:**
 """
-    # انتظار قصير لتجنب تجاور الطلبات وتجاوز معدل الدقيقة (Rate Limit)
-    time.sleep(5)
-
     try:
         response = client.models.generate_content(
             model='gemini-3.6-flash',
@@ -114,9 +111,8 @@ def process_with_gemini(client, source_name: str, title: str, summary: str):
 
     except Exception as e:
         if "429" in str(e) or "Quota" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-            print("[تنبيه كوتا] تم تجاوز الحد المسموح مؤقتاً. الانتظار 25 ثانية...", flush=True)
-            time.sleep(25)
-            # إعادة المحاولة بعد الانتظار
+            print("[تنبيه كوتا] تجاوز الحد المؤقت. انتظار 30 ثانية...", flush=True)
+            time.sleep(30)
             return process_with_gemini(client, source_name, title, summary)
         raise e
 
@@ -152,15 +148,15 @@ def send_telegram_photo_post(caption_text: str, photo_url: str) -> bool:
         return False
 
 
-def process_feed(source_key: str, feed_url: str, client) -> int:
-    print(f"[فحص] جاري قراءة مصدر: {source_key}", flush=True)
+def process_single_source(source_key: str, feed_url: str, client) -> bool:
+    print(f"[فحص المصدر] جاري قراءة: {source_key}", flush=True)
     parsed_feed = feedparser.parse(feed_url)
     
     if not parsed_feed.entries:
-        return 0
+        return False
 
-    sent_count = 0
-    for entry in parsed_feed.entries[:3]:
+    # فحص المقالات المتاحة ومعالجة خبر جديد واحد فقط من هذا المصدر
+    for entry in parsed_feed.entries[:5]:
         title = entry.get("title", "").strip()
         summary = entry.get("summary", "").strip()
         published_parsed = entry.get("published_parsed")
@@ -176,7 +172,7 @@ def process_feed(source_key: str, feed_url: str, client) -> int:
             seen_titles.add(title)
             continue
 
-        print(f"[جاري العمل] خبر جديد: {title[:40]}...", flush=True)
+        print(f"[معالجة] خبر جديد: {title[:40]}...", flush=True)
 
         try:
             person_name, post_text = process_with_gemini(client, source_key, title, summary)
@@ -184,32 +180,36 @@ def process_feed(source_key: str, feed_url: str, client) -> int:
 
             if send_telegram_photo_post(post_text, photo_url):
                 seen_titles.add(title)
-                sent_count += 1
-                time.sleep(15)
+                # انتظار 6 ثوانٍ بعد إرسال كل خبر لحماية الكوتا
+                time.sleep(6)
+                return True
         except Exception as e:
             print(f"[خطأ معالجة] {e}", flush=True)
 
-    return sent_count
+    return False
 
 
 def bot_loop() -> None:
     try:
         client = setup_gemini_client()
-        print("[جاهز] تم تهيئة SDK جوجل الجديد بنجاح.", flush=True)
+        print("[جاهز] تم تهيئة SDK بنجاح.", flush=True)
     except Exception as e:
         print(f"[خطأ] فشل التهيئة: {e}", flush=True)
         return
 
-    print("[بدء التشغيل] البوت يعمل الآن...", flush=True)
+    print("[بدء التشغيل] البوت يعمل الآن بالنظام الترتيبي...", flush=True)
 
     while True:
         try:
             for source_key, url in NEWS_FEEDS.items():
-                process_feed(source_key, url, client)
+                process_single_source(source_key, url, client)
+                # انتظار 5 ثوانٍ قبل الانتقال إلى المصدر التالي
+                time.sleep(5)
         except Exception as e:
             print(f"[خطأ الدورة] {e}", flush=True)
 
-        time.sleep(60)
+        # انتظار 30 ثانية بين كل دورة كاملة للمصادر
+        time.sleep(30)
 
 
 if __name__ == "__main__":
