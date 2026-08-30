@@ -1,4 +1,4 @@
-"""Al-Hilal News Bot (~1400 Daily Quota Engine - Fixed Model Path)
+"""Al-Hilal News Bot - Fixed Gemini SDK Implementation
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -20,7 +20,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Hilal News Bot (~1400 Daily Quota Engine) is Active!"
+    return "Hilal News Bot is Active!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
@@ -79,7 +79,7 @@ def fetch_smart_image(search_query: str) -> str:
 def create_gemini_client() -> genai.Client:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود.")
+        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود في متغيرات البيئة.")
     return genai.Client(api_key=api_key)
 
 
@@ -95,11 +95,12 @@ def process_with_gemini(client: genai.Client, source_name: str, title: str, summ
 المنشور:
 صغ المحتوى كـ خبر عاجل أو تصريح حُصري حماسي لمتابعي الكرة السعودية وجماهير الهلال. ابدأ بـ 🚨🚨🚨 | **عاجل:** أو 🎙️ | **تصريح:**
 """
-    # المسار الكامل للموديل المعتمد لـ SDK الجديد
-    model_name = os.getenv("GEMINI_MODEL", "models/gemini-2.5-flash")
-    
     try:
-        response = client.models.generate_content(model=model_name, contents=prompt)
+        # استخدام الموديل المعتمد لجيل Gemini 2.5
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
         text = response.text
         if "---SPLIT---" in text:
             parts = text.split("---SPLIT---")
@@ -195,7 +196,7 @@ def bot_loop() -> None:
         print(f"[خطأ] فشل التهيئة: {e}", flush=True)
         return
 
-    print("[بدء التشغيل] البوت يعمل الآن بمعدل ~1400 طلب يومياً...", flush=True)
+    print("[بدء التشغيل] البوت يعمل الآن...", flush=True)
 
     while True:
         try:
