@@ -1,131 +1,129 @@
-"""Al-Hilal Live News Bot (Render & Telegram)
-Fetches official and verified football news about Al-Hilal via Google News RSS.
+"""Fetch news, generate a tweet with Gemini, and publish it to X.
 
-Required Environment Variables on Render:
-- GEMINI_API_KEY
-- TELEGRAM_BOT_TOKEN
-- TELEGRAM_CHAT_ID
+Set the following environment variables before running:
+
+    X_CONSUMER_KEY
+    X_CONSUMER_SECRET
+    X_ACCESS_TOKEN
+    X_ACCESS_TOKEN_SECRET
+    GEMINI_API_KEY
+
+Optional:
+
+    GEMINI_MODEL (defaults to gemini-3.6-flash)
+    NEWS_FEED_URL (defaults to the Google News top stories RSS feed)
 """
 
 import os
-import time
-import threading
-import requests
-from flask import Flask
+
 import feedparser
 from google import genai
+import tweepy
 
-app = Flask(__name__)
+DEFAULT_NEWS_FEED_URL = (
+    "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"
+)
 
-@app.route('/')
-def home():
-    return "Hilal Live News Bot is Active & Running 24/7!"
 
-def run_web_server():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+def create_x_client() -> tweepy.Client:
+    """Create an X API v2 client using OAuth 1.0a User Context."""
+    return tweepy.Client(
+        consumer_key=os.environ["X_CONSUMER_KEY"],
+        consumer_secret=os.environ["X_CONSUMER_SECRET"],
+        access_token=os.environ["X_ACCESS_TOKEN"],
+        access_token_secret=os.environ["X_ACCESS_TOKEN_SECRET"],
+    )
 
-# مصادر أخبار مباشرة ومستقرة تغطي كافة أخبار نادي الهلال والصفقات لحظة بلحظة
-NEWS_FEEDS = {
-    "أخبار الهلال العاجلة": "https://news.google.com/rss/search?q=%D9%86%D8%A7%D8%AF%D9%8A+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
-    "صفقات الهلال": "https://news.google.com/rss/search?q=%D8%B5%D9%81%D9%82%D8%A7%D8%AA+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar",
-    "ميركاتو نادي الهلال": "https://news.google.com/rss/search?q=%D9%85%D9%8A%D8%B1%D9%83%D8%A7%D8%AA%D9%88+%D8%A7%D9%84%D9%87%D9%84%D8%A7%D9%84&hl=ar&gl=SA&ceid=SA:ar"
-}
 
-seen_posts = set()
+def publish_tweet(tweet: str) -> tweepy.Response:
+    """Publish a tweet using OAuth 1.0a User Context."""
+    return create_x_client().create_tweet(text=tweet, user_auth=True)
 
-def send_telegram_post(text: str) -> bool:
-    """Send generated news text directly to Telegram."""
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-
-    if not bot_token or not chat_id:
-        print("[خطأ] معلومات التلجرام غير متوفرة في البيئة.")
-        return False
-
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "Markdown"
-    }
-
-    try:
-        response = requests.post(url, json=payload, timeout=12)
-        res_data = response.json()
-        if res_data.get("ok"):
-            print("تم إرسال الخبر إلى تلجرام بنجاح!")
-            return True
-        else:
-            print(f"فشل الإرسال: {res_data.get('description')}")
-            return False
-    except Exception as e:
-        print(f"حدث خطأ أثناء الاتصال بتلجرام: {e}")
-        return False
 
 def create_gemini_client() -> genai.Client:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود في متغيرات البيئة.")
-    return genai.Client(api_key=api_key)
+    """Create an authenticated Gemini API client."""
+    if not os.environ.get("GEMINI_API_KEY"):
+        raise RuntimeError("Missing required environment variable: GEMINI_API_KEY")
+
+    return genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+
 
 def generate_text(client: genai.Client, prompt: str) -> str:
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    """Generate text with Gemini."""
+    model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     response = client.models.generate_content(model=model_name, contents=prompt)
     return response.text
 
-def format_news_prompt(source_name: str, news_title: str, news_summary: str) -> str:
-    return f"""المصدر: {source_name}
-عنوان الخبر: {news_title}
-تفاصيل الخبر: {news_summary}
 
-المطلوب:
-1. صغ الخبر بأسلوب إخباري عاجل وجذاب لمتابعي نادي الهلال.
-2. ابدأ المنشور بـ 🚨🚨🚨 | **عاجل:** أو **خبر هلالي:**
-3. اذكر التفاصيل والأسماء المذكورة بوضوح بدون اختصار مخل.
-4. استخدم الإيموجيات المناسبة واقتصر على نص التغطية فقط دون مقدمات.
-"""
-
-def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) -> int:
+def read_rss_feed(feed_url: str, limit: int = 5) -> list[dict[str, str]]:
+    """Read a feed and return a small, normalized list of entries."""
     parsed_feed = feedparser.parse(feed_url)
     if not parsed_feed.entries:
-        return 0
+        error = getattr(parsed_feed, "bozo_exception", None)
+        detail = f": {error}" if error else ""
+        raise RuntimeError(f"No news entries were found in the RSS feed{detail}")
 
-    sent_count = 0
-    for entry in parsed_feed.entries[:5]:
-        link = entry.get("link", "")
-        if link in seen_posts:
-            continue
+    return [
+        {
+            "title": entry.get("title", ""),
+            "link": entry.get("link", ""),
+            "summary": entry.get("summary", ""),
+        }
+        for entry in parsed_feed.entries[:limit]
+    ]
 
-        title = entry.get("title", "")
-        summary = entry.get("summary", "")
 
-        prompt = format_news_prompt(source_key, title, summary)
-        post_text = generate_text(gemini_client, prompt)
+def build_tweet_prompt(news_items: list[dict[str, str]]) -> str:
+    """Build a grounded prompt from the latest news entries."""
+    formatted_items = "\n\n".join(
+        f"Headline: {item['title']}\nSummary: {item['summary']}\nSource: {item['link']}"
+        for item in news_items
+    )
+    return f"""Write one factual tweet about the most significant story below.
 
-        if send_telegram_post(post_text):
-            seen_posts.add(link)
-            sent_count += 1
+Rules:
+- Return only the tweet text, with no quotation marks, labels, or markdown.
+- Keep it under 260 characters so it can be posted safely to X.
+- Summarize only information present in the supplied headlines or summaries.
+- Do not invent details, statistics, opinions, or quotes.
+- Use a clear, neutral news tone.
 
-    return sent_count
+Latest news:
+{formatted_items}
+"""
 
-def bot_loop() -> None:
+
+def clean_tweet(tweet: str) -> str:
+    """Normalize Gemini output and ensure it fits within X's character limit."""
+    cleaned = tweet.strip().replace("\n", " ")
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        cleaned = cleaned[3:-3].strip()
+    if cleaned.lower().startswith("tweet:"):
+        cleaned = cleaned[6:].strip()
+    cleaned = cleaned.strip("\"'").strip()
+
+    if not cleaned:
+        raise RuntimeError("Gemini returned an empty tweet")
+    if len(cleaned) > 280:
+        cleaned = f"{cleaned[:277].rstrip()}..."
+    return cleaned
+
+
+def main() -> None:
+    """Fetch news, generate a tweet, and publish it to X."""
     gemini_client = create_gemini_client()
-    print("البوت يعمل الآن بنظام جلب الأخبار المباشر والمضمون...")
+    feed_url = os.getenv("NEWS_FEED_URL", DEFAULT_NEWS_FEED_URL)
+    news_items = read_rss_feed(feed_url)
+    tweet = clean_tweet(generate_text(gemini_client, build_tweet_prompt(news_items)))
 
-    while True:
-        try:
-            for source_key, url in NEWS_FEEDS.items():
-                process_feed(source_key, url, gemini_client)
-        except Exception as e:
-            print(f"حدث خطأ أثناء فحص الأخبار: {e}")
+    response = publish_tweet(tweet)
+    tweet_id = response.data.get("id") if response.data else None
+    if not tweet_id:
+        raise RuntimeError("X did not return a tweet ID after publishing")
 
-        # التكرار كل 30 ثانية لتحديث سريع ومضمون
-        time.sleep(30)
+    print(f"Published tweet {tweet_id}:")
+    print(tweet)
+
 
 if __name__ == "__main__":
-    server_thread = threading.Thread(target=run_web_server)
-    server_thread.daemon = True
-    server_thread.start()
-
-    bot_loop()
+    main()
