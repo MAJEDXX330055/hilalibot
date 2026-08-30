@@ -1,9 +1,9 @@
-"""Al-Hilal News Bot (Max Free Quota Edition ~1400 Requests/Day)
+"""Al-Hilal News Bot (~1400 Daily Quota Engine - Fixed SDK Imports)
 
 Configured to utilize ~1,400 daily API calls with a 100-request safety buffer:
+- Uses google.genai client properly.
 - Checks feeds with a 60-second delay between full cycles.
 - Processes up to 3 fresh items per feed with 15s delay between requests.
-- Uses stable gemini-1.5-flash model via google.generativeai.
 
 Required Environment Variables on Render:
 - GEMINI_API_KEY
@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 import requests
 from flask import Flask
 import feedparser
-import google.generativeai as genai
+from google import genai
 
 app = Flask(__name__)
 
@@ -81,15 +81,14 @@ def fetch_smart_image(search_query: str) -> str:
     return random.choice(DEFAULT_IMAGES)
 
 
-def setup_gemini():
+def create_gemini_client() -> genai.Client:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود.")
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-1.5-flash")
+    return genai.Client(api_key=api_key)
 
 
-def process_with_gemini(model, source_name: str, title: str, summary: str):
+def process_with_gemini(client: genai.Client, source_name: str, title: str, summary: str):
     prompt = f"""المصدر: {source_name}
 العنوان: {title}
 التفاصيل: {summary}
@@ -101,8 +100,10 @@ def process_with_gemini(model, source_name: str, title: str, summary: str):
 المنشور:
 صغ المحتوى كـ خبر عاجل أو تصريح حُصري حماسي لمتابعي الكرة السعودية وجماهير الهلال. ابدأ بـ 🚨🚨🚨 | **عاجل:** أو 🎙️ | **تصريح:**
 """
+    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    
     try:
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(model=model_name, contents=prompt)
         text = response.text
         if "---SPLIT---" in text:
             parts = text.split("---SPLIT---")
@@ -114,7 +115,7 @@ def process_with_gemini(model, source_name: str, title: str, summary: str):
 
     except Exception as e:
         if "429" in str(e) or "Quota" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-            print("[تنبيه كوتا] تجاوز الحد المؤقت. انتظار 60 ثانية لاستعادة الحصة...", flush=True)
+            print("[تنبيه كوتا] تجاوز الحد المؤقت. انتظار 60 ثانية...", flush=True)
             time.sleep(60)
         raise e
 
@@ -150,7 +151,7 @@ def send_telegram_photo_post(caption_text: str, photo_url: str) -> bool:
         return False
 
 
-def process_feed(source_key: str, feed_url: str, model) -> int:
+def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) -> int:
     print(f"[فحص] جاري قراءة مصدر: {source_key}", flush=True)
     parsed_feed = feedparser.parse(feed_url)
     
@@ -158,7 +159,6 @@ def process_feed(source_key: str, feed_url: str, model) -> int:
         return 0
 
     sent_count = 0
-    # قراءة حتى 3 أخبار جديدة من كل مصدر لزيادة التغطية
     for entry in parsed_feed.entries[:3]:
         title = entry.get("title", "").strip()
         summary = entry.get("summary", "").strip()
@@ -178,13 +178,12 @@ def process_feed(source_key: str, feed_url: str, model) -> int:
         print(f"[جاري العمل] خبر جديد: {title[:40]}...", flush=True)
 
         try:
-            person_name, post_text = process_with_gemini(model, source_key, title, summary)
+            person_name, post_text = process_with_gemini(gemini_client, source_key, title, summary)
             photo_url = fetch_smart_image(person_name)
 
             if send_telegram_photo_post(post_text, photo_url):
                 seen_titles.add(title)
                 sent_count += 1
-                # فاصل زمني (15 ثانية) بين كل خبر والآخر لحماية الاستهلاك في الدقيقة
                 time.sleep(15)
         except Exception as e:
             print(f"[خطأ معالجة] {e}", flush=True)
@@ -194,8 +193,8 @@ def process_feed(source_key: str, feed_url: str, model) -> int:
 
 def bot_loop() -> None:
     try:
-        model = setup_gemini()
-        print("[جاهز] تم تهيئة Gemini 1.5 Flash بنجاح.", flush=True)
+        gemini_client = create_gemini_client()
+        print("[جاهز] تم تهيئة Gemini Client بنجاح.", flush=True)
     except Exception as e:
         print(f"[خطأ] فشل التهيئة: {e}", flush=True)
         return
@@ -205,11 +204,10 @@ def bot_loop() -> None:
     while True:
         try:
             for source_key, url in NEWS_FEEDS.items():
-                process_feed(source_key, url, model)
+                process_feed(source_key, url, gemini_client)
         except Exception as e:
             print(f"[خطأ الدورة] {e}", flush=True)
 
-        # انتظار 60 ثانية (دقيقة واحدة) قبل بدء دورة فحص جديدة للمصادر
         time.sleep(60)
 
 
