@@ -1,12 +1,12 @@
-"""Al-Hilal Pure News Telegram Bot for Replit.
+"""Al-Hilal Pure News Telegram Bot (Render Edition)
 
 Fetches real sports news, formats it via Gemini, and publishes directly to Telegram.
 No automated banter or random tweets — Pure News Only.
 
-Set the following Secrets in Replit (Tools -> Secrets):
-    TELEGRAM_BOT_TOKEN
-    TELEGRAM_CHAT_ID
-    GEMINI_API_KEY
+Required Environment Variables on Render:
+- GEMINI_API_KEY
+- TELEGRAM_BOT_TOKEN
+- TELEGRAM_CHAT_ID
 """
 
 import os
@@ -21,10 +21,11 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Hilal Pure News Bot is Active 24/7!"
+    return "Hilal Pure News Bot is Active 24/7 on Render!"
 
 def run_web_server():
-    port = int(os.environ.get("PORT", 8080))
+    # Render يمرر المنافذ تلقائياً عبر متغير البيئة PORT
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
 # مصادر الأخبار المباشرة والمضمونة لنادي الهلال والكرة السعودية
@@ -38,12 +39,12 @@ seen_posts = set()
 
 
 def send_telegram_post(text: str) -> bool:
-    """إرسال النص إلى تلجرام."""
+    """إرسال الخبر المنسق مباشرة إلى تلجرام."""
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
     if not bot_token or not chat_id:
-        print("[خطأ] يرجى تأكيد وجود TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID في Secrets")
+        print("[خطأ] يرجى التأكد من إضافة TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID في Environment Variables")
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
@@ -54,7 +55,7 @@ def send_telegram_post(text: str) -> bool:
     }
 
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=12)
         res_data = response.json()
         if res_data.get("ok"):
             print("تم إرسال الخبر الحقيقي إلى تلجرام بنجاح!")
@@ -63,14 +64,14 @@ def send_telegram_post(text: str) -> bool:
             print(f"فشل الإرسال: {res_data.get('description')}")
             return False
     except Exception as e:
-        print(f"خطأ اتصال بتلجرام: {e}")
+        print(f"حدث خطأ أثناء الاتصال بتلجرام: {e}")
         return False
 
 
 def create_gemini_client() -> genai.Client:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("يرجى إضافة مفتاح GEMINI_API_KEY في Secrets.")
+        raise RuntimeError("مفتاح GEMINI_API_KEY غير موجود في متغيرات البيئة.")
     return genai.Client(api_key=api_key)
 
 
@@ -88,8 +89,8 @@ def build_news_prompt(source_name: str, title: str, summary: str) -> str:
 المطلوب:
 1. صغ المنشور كـ خبر عاجل أو تغطية شمولية تخص نادي الهلال والكرة السعودية.
 2. ابدأ المنشور بـ 🚨🚨🚨 | **عاجل:** أو **خبر هلالي:**
-3. حافظ على كل التفاصيل والأسماء الواردة بوضوح.
-4. اخرج النص النهائي فقط بدون أي مقدمات أو شرح أو طقطقة.
+3. حافظ على كل التفاصيل والأسماء الواردة بوضوح ودون اختصار مخل.
+4. اخرج النص النهائي المنسق فقط بدون أي مقدمات أو شرح أو طقطقة.
 """
 
 
@@ -119,7 +120,7 @@ def process_feed(source_key: str, feed_url: str, gemini_client: genai.Client) ->
 
 def bot_loop() -> None:
     gemini_client = create_gemini_client()
-    print("البوت يعمل الآن ومخصص ونقّاد للأخبار الحقيقية فقط بدون أي طقطقة عشوائية...")
+    print("البوت يعمل الآن على Render وجاهز لنشر الأخبار الحقيقية المحدثة فقط...")
 
     while True:
         try:
@@ -128,8 +129,8 @@ def bot_loop() -> None:
         except Exception as e:
             print(f"حدث خطأ أثناء فحص الأخبار: {e}")
 
-        # فحص كافي كل 30 ثانية
-        time.sleep(30)
+        # فحص دوري كل 20 ثانية
+        time.sleep(20)
 
 
 if __name__ == "__main__":
